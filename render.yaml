@@ -1,0 +1,21 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Deploys the Inverted Comma Express API + bundled React frontend as one web service.
+services:
+  - type: web
+    name: invertedcomma
+    runtime: node
+    region: singapore          # closest to Neon Singapore DB → lowest latency
+    plan: free
+    branch: main
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/quotes
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false            # set manually in dashboard (secret)
+      - key: JWT_SECRET
+        generateValue: true    # Render generates a strong random value
+      - key: GEMINI_API_KEY
+        sync: false            # set manually in dashboard (secret)
