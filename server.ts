@@ -55,7 +55,8 @@ app.use(helmet({
     directives: {
       defaultSrc:     ["'self'"],
       scriptSrc:      ["'self'", "'unsafe-inline'", "accounts.google.com"],
-      styleSrc:       ["'self'", "'unsafe-inline'"],
+      styleSrc:       ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc:        ["'self'", "https://fonts.gstatic.com", "data:"],
       imgSrc:         ["'self'", "data:", "https:"],
       connectSrc:     ["'self'", "https://generativelanguage.googleapis.com"],
       frameSrc:       ["'none'"],
@@ -64,6 +65,9 @@ app.use(helmet({
     },
   } : false, // relax CSP in dev so Vite HMR works
   crossOriginEmbedderPolicy: false, // needed for @napi-rs/canvas
+  // Allow OG images (/api/og/*) to be fetched cross-origin by social crawlers
+  // (Twitter, Facebook, LinkedIn) and let static assets load without CORS friction.
+  crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
 
 // ── Security: CORS ────────────────────────────────────────────────────────────
@@ -74,9 +78,12 @@ const ALLOWED_ORIGINS = IS_PROD
     ]
   : ["http://localhost:3000", "http://localhost:5173"];
 
-app.use(cors({
+// IMPORTANT: CORS is scoped to /api only. The static frontend (HTML, JS, CSS,
+// fonts) must never be gated by the API origin allowlist — otherwise asset
+// requests from the serving origin get 403'd and the app renders blank.
+app.use("/api", cors({
   origin(origin, cb) {
-    // Allow requests with no origin (curl, mobile apps, same-origin SSR)
+    // Allow requests with no origin (curl, mobile apps, same-origin subresources)
     if (!origin) return cb(null, true);
     if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
     cb(new Error(`CORS: origin '${origin}' not allowed`));
@@ -86,8 +93,8 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"],
 }));
 
-// CORS error handler — must come immediately after cors() middleware
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+// CORS error handler — scoped to /api, must follow the cors() middleware
+app.use("/api", (err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (err?.message?.startsWith("CORS:")) {
     return res.status(403).json({ error: "Forbidden — cross-origin request not allowed" });
   }
@@ -122,7 +129,8 @@ const aiLimiter = rateLimit({
   message: { error: "AI rate limit reached — please wait a few minutes." },
 });
 
-app.use(generalLimiter);
+// Rate-limit only the API — never throttle static asset delivery.
+app.use("/api", generalLimiter);
 app.use("/api/auth/login",           authLimiter);
 app.use("/api/auth/register",        authLimiter);
 app.use("/api/auth/forgot-password", authLimiter);

@@ -3,9 +3,20 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
 
+// Strip the `crossorigin` attribute Vite adds to <script>/<link> tags.
+// The app bundle is same-origin; with `crossorigin` the browser fetches it in
+// CORS mode, which our API CORS allowlist then rejects on any non-allowlisted
+// origin (e.g. *.onrender.com) → module fails to execute → blank page.
+const stripCrossorigin = {
+  name: "strip-crossorigin",
+  transformIndexHtml(html: string) {
+    return html.replace(/\s+crossorigin/g, "");
+  },
+};
+
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), stripCrossorigin],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
