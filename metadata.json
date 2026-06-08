@@ -1,0 +1,6 @@
+{
+  "name": "Inverted Comma",
+  "description": "A curated collection of quotes across various topics with tag organization, reading lists, user discussions, and AI-powered counterpoints.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

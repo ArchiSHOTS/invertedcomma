@@ -1,0 +1,13 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Legacy JSON data files — replaced by Neon PostgreSQL
+data/users.json
+data/authors.json
+data/runtime-quotes.json
