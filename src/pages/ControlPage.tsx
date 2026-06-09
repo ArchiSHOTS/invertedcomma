@@ -325,7 +325,8 @@ function StatusBadge({ status }: { status?: string }) {
 
 const SOURCE_TYPE_LABELS: Record<string, string> = {
   book: "Book", movie: "Movie", speech: "Speech", essay: "Essay",
-  poem: "Poem", article: "Article", interview: "Interview", tweet: "Tweet", unknown: "Unknown",
+  poem: "Poem", article: "Article", interview: "Interview", tweet: "Tweet",
+  wikiquote: "Wikiquote", unknown: "Unknown",
 };
 
 // ── Source type config ────────────────────────────────────────────────────────

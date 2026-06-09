@@ -22,6 +22,7 @@ export type SourceType =
   | "interview"
   | "poem"
   | "tweet"
+  | "wikiquote"
   | "unknown";
 
 export interface Quote {
