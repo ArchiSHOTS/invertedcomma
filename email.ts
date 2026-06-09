@@ -73,9 +73,9 @@ function layout(bodyHtml: string): string {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${CREAM};padding:32px 16px;">
     <tr><td align="center">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border:1px solid #e7e5e4;border-radius:16px;overflow:hidden;">
-        <tr><td align="center" style="background:${DARK};padding:26px 32px;">
-          <img src="${SITE_URL}/email/logo-white.png" height="30" alt="Inverted Comma"
-               style="display:block;height:30px;width:auto;border:0;">
+        <tr><td align="center" style="background:${GREEN};padding:26px 32px;">
+          <img src="${SITE_URL}/email/logo-white.png" height="34" alt="Inverted Comma"
+               style="display:block;height:34px;width:auto;border:0;">
         </td></tr>
         <tr><td style="padding:32px;">
           ${bodyHtml}
