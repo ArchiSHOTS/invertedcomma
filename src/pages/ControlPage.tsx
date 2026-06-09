@@ -757,6 +757,11 @@ function QuotesTab() {
     running: boolean; imported: number; authorsDone: number; authorsTotal: number; error: string | null;
   }>(null);
 
+  // Bulk selection
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkApproving, setBulkApproving] = useState(false);
+  const [bulkRejecting, setBulkRejecting] = useState(false);
+
   const load = useCallback(() => {
     setLoading(true);
     // Merge the public list (seed + published) with the admin list (ALL runtime
@@ -822,6 +827,41 @@ function QuotesTab() {
     if (!confirm("Delete this quote permanently?")) return;
     const res = await fetch(`/api/admin/quotes/${id}`, { method: "DELETE", headers: authHeaders() });
     if (res.ok) setQuotes(prev => prev.filter(q => q.id !== id));
+  };
+
+  const bulkApprove = async () => {
+    if (selected.size === 0) return;
+    setBulkApproving(true);
+    try {
+      await fetch("/api/admin/quotes/bulk/approve", {
+        method: "POST", headers: authHeaders(), body: JSON.stringify({ ids: [...selected] }),
+      });
+      setQuotes(prev => prev.map(q => selected.has(q.id) ? { ...q, status: "published" } : q));
+      setSelected(new Set());
+    } finally { setBulkApproving(false); }
+  };
+
+  const bulkReject = async () => {
+    if (selected.size === 0) return;
+    setBulkRejecting(true);
+    try {
+      await fetch("/api/admin/quotes/bulk/reject", {
+        method: "POST", headers: authHeaders(), body: JSON.stringify({ ids: [...selected] }),
+      });
+      setQuotes(prev => prev.map(q => selected.has(q.id) ? { ...q, status: "rejected" } : q));
+      setSelected(new Set());
+    } finally { setBulkRejecting(false); }
+  };
+
+  const toggleSelect = (id: string) => {
+    const s = new Set(selected);
+    if (s.has(id)) s.delete(id); else s.add(id);
+    setSelected(s);
+  };
+
+  const toggleSelectAll = () => {
+    if (selected.size === displayed.length) setSelected(new Set());
+    else setSelected(new Set(displayed.map(q => q.id)));
   };
 
   const startEdit = (q: Quote) => {
@@ -1050,6 +1090,33 @@ function QuotesTab() {
         </div>
       )}
 
+      {/* Bulk toolbar */}
+      {selected.size > 0 && (
+        <div className="sticky top-20 bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between gap-4">
+          <span className="text-sm font-medium text-emerald-900">{selected.size} selected</span>
+          <div className="flex gap-2">
+            <button
+              onClick={bulkApprove} disabled={bulkApproving}
+              className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-semibold rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+            >
+              <CheckCircle className="w-3.5 h-3.5" /> {bulkApproving ? "Approving…" : `Approve (${selected.size})`}
+            </button>
+            <button
+              onClick={bulkReject} disabled={bulkRejecting}
+              className="px-3 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+            >
+              <XCircle className="w-3.5 h-3.5" /> {bulkRejecting ? "Rejecting…" : `Reject (${selected.size})`}
+            </button>
+            <button
+              onClick={() => setSelected(new Set())}
+              className="px-3 py-1.5 bg-stone-200 text-stone-600 text-xs font-semibold rounded-lg hover:bg-stone-300 transition-colors"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Quote list */}
       {loading ? (
         <div className="flex justify-center py-12"><RefreshCw className="w-5 h-5 animate-spin text-stone-400" /></div>
@@ -1057,6 +1124,14 @@ function QuotesTab() {
         <div className="space-y-2">
           {displayed.length === 0 && (
             <p className="text-sm text-stone-400 text-center italic py-10">No quotes match your filters.</p>
+          )}
+          {/* Select all checkbox */}
+          {displayed.length > 0 && (
+            <div className="px-4 py-2 flex items-center gap-2">
+              <input type="checkbox" checked={selected.size > 0 && selected.size === displayed.length}
+                onChange={toggleSelectAll} className="w-4 h-4 cursor-pointer" />
+              <label className="text-xs text-stone-500 cursor-pointer">Select all ({displayed.length} on this page)</label>
+            </div>
           )}
           {displayed.slice(paged.from, paged.to).map(q =>
             editingId === q.id ? (
@@ -1092,7 +1167,8 @@ function QuotesTab() {
                 </div>
               </div>
             ) : (
-              <div key={q.id} className={`flex items-start gap-3 p-4 bg-white border rounded-2xl transition-colors ${q.status === "pending" ? "border-amber-200 bg-amber-50/30" : "border-stone-200"}`}>
+              <div key={q.id} className={`flex items-start gap-3 p-4 bg-white border rounded-2xl transition-colors ${selected.has(q.id) ? "border-emerald-400 bg-emerald-50/30" : q.status === "pending" ? "border-amber-200 bg-amber-50/30" : "border-stone-200"}`}>
+                <input type="checkbox" checked={selected.has(q.id)} onChange={() => toggleSelect(q.id)} className="w-4 h-4 mt-1 flex-shrink-0 cursor-pointer" />
                 <div className="flex-1 min-w-0 space-y-1.5">
                   <p className="font-serif italic text-sm text-stone-800 line-clamp-2">"{q.text}"</p>
                   <div className="flex flex-wrap items-center gap-2 text-[10px]">

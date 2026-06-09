@@ -998,6 +998,46 @@ app.post("/api/admin/quotes/:id/reject", adminMiddleware, async (req, res) => {
   res.json({ ok: true, quote: q });
 });
 
+// Bulk approve quotes (by IDs or filter)
+app.post("/api/admin/quotes/bulk/approve", adminMiddleware, async (req: any, res) => {
+  const { ids, status, sourceType } = req.body;
+  let toUpdate = ids ? ids : [];
+  if (!ids && (status || sourceType)) {
+    const all = await getRuntimeQuotes();
+    toUpdate = all
+      .filter(q => !status || q.status === status)
+      .filter(q => !sourceType || q.sourceType === sourceType)
+      .map(q => q.id);
+  }
+  if (toUpdate.length === 0) return res.json({ updated: 0 });
+  let updated = 0;
+  for (const id of toUpdate) {
+    const q = await updateRuntimeQuote(id, { status: "published" });
+    if (q) updated++;
+  }
+  res.json({ updated });
+});
+
+// Bulk reject quotes (by IDs or filter)
+app.post("/api/admin/quotes/bulk/reject", adminMiddleware, async (req: any, res) => {
+  const { ids, status, sourceType } = req.body;
+  let toUpdate = ids ? ids : [];
+  if (!ids && (status || sourceType)) {
+    const all = await getRuntimeQuotes();
+    toUpdate = all
+      .filter(q => !status || q.status === status)
+      .filter(q => !sourceType || q.sourceType === sourceType)
+      .map(q => q.id);
+  }
+  if (toUpdate.length === 0) return res.json({ updated: 0 });
+  let updated = 0;
+  for (const id of toUpdate) {
+    const q = await updateRuntimeQuote(id, { status: "rejected" });
+    if (q) updated++;
+  }
+  res.json({ updated });
+});
+
 app.get("/api/admin/quotes", adminMiddleware, async (req, res) => {
   const quotes = await getRuntimeQuotes();
   res.json({ quotes, total: quotes.length });
