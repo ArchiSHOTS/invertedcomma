@@ -145,6 +145,7 @@ app.use("/api", generalLimiter);
 app.use("/api/auth/login",           authLimiter);
 app.use("/api/auth/register",        authLimiter);
 app.use("/api/auth/forgot-password", authLimiter);
+app.use("/api/auth/change-password", authLimiter);
 app.use("/api/quotes/:id/insights",  aiLimiter);
 app.use("/api/discussions/:id/ai-counterpoint", aiLimiter);
 app.use("/api/admin/extract-youtube", aiLimiter);
@@ -182,6 +183,11 @@ const LoginSchema = z.object({
 
 const ForgotPasswordSchema = z.object({
   email: z.string().email().toLowerCase(),
+});
+
+const ChangePasswordSchema = z.object({
+  currentPassword: z.string().max(128).optional().default(""),
+  newPassword:     z.string().min(8).max(128),
 });
 
 const InterestsSchema = z.object({
@@ -268,6 +274,12 @@ async function generateWithFallback(
 const JWT_SECRET = process.env.JWT_SECRET || "ic-dev-secret-change-in-production";
 const SALT_ROUNDS = 10;
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
+
+// Admin bootstrap (env-driven — never hardcode the real password in the repo)
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "").toLowerCase();
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
+const ADMIN_PASSWORD_RESET = process.env.ADMIN_PASSWORD_RESET === "true";
+const LEGACY_ADMIN_EMAIL = "admin@invertedcomma.com";
 
 // Custom tags added at runtime (admin-only, in-memory is fine — low-churn)
 const customTags: string[] = [];
@@ -408,21 +420,31 @@ function sanitiseUser(u: any) {
   };
 }
 
-function signToken(userId: string): string {
+function signToken(userId: string, tokenVersion = 0): string {
   if (!jwt) throw new Error("jsonwebtoken not installed");
-  return jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: "30d" });
+  return jwt.sign({ sub: userId, tv: tokenVersion }, JWT_SECRET, { expiresIn: "30d" });
 }
 
-function verifyToken(token: string): { sub: string } | null {
+function verifyToken(token: string): { sub: string; tv?: number } | null {
   if (!jwt) return null;
-  try { return jwt.verify(token, JWT_SECRET) as { sub: string }; } catch { return null; }
+  try { return jwt.verify(token, JWT_SECRET) as { sub: string; tv?: number }; } catch { return null; }
 }
 
-function authMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
+// Reject a token whose embedded version no longer matches the user's current
+// token_version (bumped on password change → invalidates older/stolen sessions).
+function tokenVersionStale(payload: { tv?: number }, user: { tokenVersion?: number }) {
+  return (payload.tv ?? 0) !== (user.tokenVersion ?? 0);
+}
+
+async function authMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
   const token = (req.headers.authorization || "").replace("Bearer ", "").trim();
   if (!token) return res.status(401).json({ error: "Unauthorized" });
   const payload = verifyToken(token);
   if (!payload) return res.status(401).json({ error: "Invalid token" });
+  const user = await getUserById(payload.sub);
+  if (!user || tokenVersionStale(payload, user)) {
+    return res.status(401).json({ error: "Session expired — please sign in again" });
+  }
   (req as any).userId = payload.sub;
   next();
 }
@@ -433,7 +455,10 @@ async function adminMiddlewareFn(req: express.Request, res: express.Response, ne
   const payload = verifyToken(token);
   if (!payload) return res.status(401).json({ error: "Invalid token" });
   const user = await getUserById(payload.sub);
-  if (!user || (user.role !== "admin" && user.role !== "moderator")) {
+  if (!user || tokenVersionStale(payload, user)) {
+    return res.status(401).json({ error: "Session expired — please sign in again" });
+  }
+  if (user.role !== "admin" && user.role !== "moderator") {
     return res.status(403).json({ error: "Forbidden — admin or moderator role required" });
   }
   (req as any).userId   = payload.sub;
@@ -449,7 +474,10 @@ async function superAdminMiddlewareFn(req: express.Request, res: express.Respons
   const payload = verifyToken(token);
   if (!payload) return res.status(401).json({ error: "Invalid token" });
   const user = await getUserById(payload.sub);
-  if (!user || user.role !== "admin") {
+  if (!user || tokenVersionStale(payload, user)) {
+    return res.status(401).json({ error: "Session expired — please sign in again" });
+  }
+  if (user.role !== "admin") {
     return res.status(403).json({ error: "Forbidden — admin role required" });
   }
   (req as any).userId   = payload.sub;
@@ -493,7 +521,7 @@ app.post("/api/auth/register", validate(RegisterSchema), async (req: any, res) =
   const avatar       = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=3D5A3E&color=fff&size=100`;
 
   const newUser = await createUser({ id, email, passwordHash, displayName, handle, avatar, interests });
-  const token   = signToken(id);
+  const token   = signToken(id, newUser.tokenVersion);
   res.status(201).json({ token, user: sanitiseUser(newUser) });
 });
 
@@ -507,7 +535,7 @@ app.post("/api/auth/login", validate(LoginSchema), async (req: any, res) => {
   const match = await bcrypt.compare(password, user.passwordHash);
   if (!match) return res.status(401).json({ error: "Invalid email or password" });
 
-  res.json({ token: signToken(user.id), user: sanitiseUser(user) });
+  res.json({ token: signToken(user.id, user.tokenVersion), user: sanitiseUser(user) });
 });
 
 app.get("/api/auth/me", async (req, res) => {
@@ -516,7 +544,9 @@ app.get("/api/auth/me", async (req, res) => {
   const payload = verifyToken(token);
   if (!payload) return res.status(401).json({ error: "Invalid or expired token" });
   const user = await getUserById(payload.sub);
-  if (!user) return res.status(401).json({ error: "User not found" });
+  if (!user || tokenVersionStale(payload, user)) {
+    return res.status(401).json({ error: "Session expired — please sign in again" });
+  }
   res.json({ user: sanitiseUser(user) });
 });
 
@@ -525,6 +555,31 @@ app.post("/api/auth/forgot-password", validate(ForgotPasswordSchema), async (req
   const user = await getUserByEmail(email);
   if (user) console.log(`[auth] Password reset requested for ${email} — send reset link in production`);
   res.json({ message: "If an account exists for this email, a reset link has been sent." });
+});
+
+// Change password for the logged-in user. Bumps token_version (invalidating
+// other sessions) and returns a fresh token so the current session stays valid.
+app.post("/api/auth/change-password", authMiddleware, validate(ChangePasswordSchema), async (req: any, res) => {
+  if (!bcrypt || !jwt) return res.status(503).json({ error: "Auth packages not installed." });
+  const { currentPassword, newPassword } = req.validated as z.infer<typeof ChangePasswordSchema>;
+
+  const user = await getUserById(req.userId);
+  if (!user) return res.status(404).json({ error: "User not found" });
+
+  // Accounts created via Google have an empty password hash — they may set a
+  // password without supplying a current one. Everyone else must verify it.
+  const hasPassword = !!user.passwordHash;
+  if (hasPassword) {
+    const match = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!match) return res.status(401).json({ error: "Current password is incorrect" });
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+  const nextVersion  = (user.tokenVersion ?? 0) + 1;
+  await updateUser(user.id, { passwordHash, tokenVersion: nextVersion });
+
+  // Re-issue a token at the new version so this session is not logged out.
+  res.json({ token: signToken(user.id, nextVersion), message: "Password updated" });
 });
 
 app.post("/api/auth/google", async (req, res) => {
@@ -561,7 +616,7 @@ app.post("/api/auth/google", async (req, res) => {
         interests: [],
       });
     }
-    res.json({ token: signToken(user.id), user: sanitiseUser(user) });
+    res.json({ token: signToken(user.id, user.tokenVersion), user: sanitiseUser(user) });
   } catch (err: any) {
     console.warn("[auth] Google verification failed:", err.message);
     res.status(401).json({ error: "Invalid or expired Google credential" });
@@ -1328,29 +1383,71 @@ app.get("/api/og/default", (_req, res) => {
   try { sendOg(res, buildDefaultOg(), cacheKey); } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Admin bootstrap ───────────────────────────────────────────────────────────
+// Idempotent. Creates/migrates the admin from ADMIN_EMAIL/ADMIN_PASSWORD (env).
+// Never resets an existing admin's password on a normal boot (so in-dashboard
+// password changes stick) — except when ADMIN_PASSWORD_RESET=true (break-glass).
+async function ensureAdmin() {
+  if (!bcrypt) return;
+  if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
+    console.warn("[auth] ADMIN_EMAIL / ADMIN_PASSWORD not set — skipping admin bootstrap.");
+    return;
+  }
+
+  const existing = await getUserByEmail(ADMIN_EMAIL);
+  if (existing) {
+    const updates: any = {};
+    if (existing.role !== "admin") updates.role = "admin";
+    if (ADMIN_PASSWORD_RESET) {
+      updates.passwordHash = await bcrypt.hash(ADMIN_PASSWORD, SALT_ROUNDS);
+      updates.tokenVersion = (existing.tokenVersion ?? 0) + 1;
+    }
+    if (Object.keys(updates).length) {
+      await updateUser(existing.id, updates);
+      console.log(`[auth] Admin ${ADMIN_EMAIL} ${ADMIN_PASSWORD_RESET ? "password reset" : "role ensured"}.`);
+    } else {
+      console.log(`[auth] Admin ${ADMIN_EMAIL} present.`);
+    }
+    return;
+  }
+
+  const hash = await bcrypt.hash(ADMIN_PASSWORD, SALT_ROUNDS);
+
+  // Migrate the legacy seeded admin (admin@invertedcomma.com) if present.
+  const legacy = await getUserByEmail(LEGACY_ADMIN_EMAIL);
+  if (legacy) {
+    await updateUser(legacy.id, {
+      email: ADMIN_EMAIL,
+      passwordHash: hash,
+      role: "admin",
+      tokenVersion: (legacy.tokenVersion ?? 0) + 1,
+    });
+    console.log(`[auth] Migrated legacy admin → ${ADMIN_EMAIL}.`);
+    return;
+  }
+
+  // Fresh install.
+  const id = "user_admin_001";
+  await createUser({
+    id,
+    email:        ADMIN_EMAIL,
+    passwordHash: hash,
+    displayName:  "Admin",
+    handle:       "ic_admin",
+    avatar:       "https://ui-avatars.com/api/?name=Admin&background=3D5A3E&color=fff&size=100",
+    interests:    [],
+    role:         "admin",
+  });
+  console.log(`[auth] Created admin ${ADMIN_EMAIL}.`);
+}
+
 // ── Server startup ────────────────────────────────────────────────────────────
 async function startServer() {
   // Connect to database
   await testConnection();
 
-  // Seed admin user if missing
-  if (bcrypt) {
-    const existing = await getUserByEmail("admin@invertedcomma.com");
-    if (!existing) {
-      const hash = await bcrypt.hash("admin123", SALT_ROUNDS);
-      await createUser({
-        id:           "user_admin_001",
-        email:        "admin@invertedcomma.com",
-        passwordHash: hash,
-        displayName:  "Admin",
-        handle:       "ic_admin",
-        avatar:       "https://ui-avatars.com/api/?name=Admin&background=3D5A3E&color=fff&size=100",
-        interests:    [],
-        role:         "admin",
-      });
-      console.log("[auth] Seeded admin user (admin@invertedcomma.com / admin123)");
-    }
-  }
+  // Ensure the admin account from env (ADMIN_EMAIL / ADMIN_PASSWORD).
+  await ensureAdmin();
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });

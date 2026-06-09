@@ -117,6 +117,7 @@ export async function createUser(u: {
 }
 
 export async function updateUser(id: string, fields: Partial<{
+  email: string; passwordHash: string;
   displayName: string; handle: string; avatar: string; bio: string;
   anonymous: boolean; interests: string[]; isSubscribed: boolean;
   role: string; savedQuoteIds: string[]; tokenVersion: number;
@@ -124,6 +125,8 @@ export async function updateUser(id: string, fields: Partial<{
   const sets: string[] = [];
   const vals: any[] = [];
   let i = 1;
+  if (fields.email         !== undefined) { sets.push(`email=$${i++}`);               vals.push(fields.email.toLowerCase()); }
+  if (fields.passwordHash  !== undefined) { sets.push(`password_hash=$${i++}`);       vals.push(fields.passwordHash); }
   if (fields.displayName   !== undefined) { sets.push(`display_name=$${i++}`);       vals.push(fields.displayName); }
   if (fields.handle        !== undefined) { sets.push(`handle=$${i++}`);              vals.push(fields.handle); }
   if (fields.avatar        !== undefined) { sets.push(`avatar=$${i++}`);              vals.push(fields.avatar); }

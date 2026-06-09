@@ -11,6 +11,7 @@ import {
   ToggleLeft, ToggleRight, Copy, ImageIcon, MapPin, Globe,
 } from "lucide-react";
 import { useUser } from "../context/UserContext";
+import Logo from "../components/Logo";
 import { Quote, ExtractedQuote, Subscriber, SourceType } from "../types";
 
 const TOKEN_KEY = "ic_token";
@@ -54,15 +55,14 @@ function LoginGate({ onSuccess }: { onSuccess: () => void }) {
   };
 
   return (
-    <div className="min-h-screen bg-[#111] flex items-center justify-center p-4">
+    <div className="min-h-screen bg-[#0F1F10] flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
-        {/* Logo mark */}
+        {/* Brand logo */}
         <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-white/10 mb-4">
-            <ShieldCheck className="w-6 h-6 text-white" />
+          <div className="flex justify-center mb-5">
+            <Logo size={40} light />
           </div>
-          <h1 className="text-white font-serif italic font-bold text-2xl tracking-tight">"invertedcomma</h1>
-          <p className="text-white/40 text-xs mt-1 font-mono uppercase tracking-widest">Control Panel</p>
+          <p className="text-emerald-400/70 text-[10px] font-mono uppercase tracking-[0.25em]">Control Panel</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3">
@@ -74,8 +74,8 @@ function LoginGate({ onSuccess }: { onSuccess: () => void }) {
               onChange={e => setEmail(e.target.value)}
               autoFocus
               required
-              placeholder="admin@invertedcomma.com"
-              className="w-full bg-white/8 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-white/30 focus:bg-white/10 transition-all"
+              placeholder="you@example.com"
+              className="w-full bg-white/[0.07] border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-emerald-400/40 focus:bg-white/10 focus:ring-2 focus:ring-emerald-400/15 transition-all"
             />
           </div>
           <div>
@@ -87,7 +87,7 @@ function LoginGate({ onSuccess }: { onSuccess: () => void }) {
                 onChange={e => setPassword(e.target.value)}
                 required
                 placeholder="••••••••"
-                className="w-full bg-white/8 border border-white/10 rounded-xl px-4 py-3 pr-10 text-sm text-white placeholder-white/20 focus:outline-none focus:border-white/30 focus:bg-white/10 transition-all"
+                className="w-full bg-white/[0.07] border border-white/10 rounded-xl px-4 py-3 pr-10 text-sm text-white placeholder-white/20 focus:outline-none focus:border-emerald-400/40 focus:bg-white/10 focus:ring-2 focus:ring-emerald-400/15 transition-all"
               />
               <button
                 type="button"
@@ -109,7 +109,7 @@ function LoginGate({ onSuccess }: { onSuccess: () => void }) {
           <button
             type="submit"
             disabled={loading}
-            className="w-full h-11 bg-white text-[#111] font-bold text-sm rounded-xl hover:bg-white/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 mt-2"
+            className="w-full h-11 bg-[#3D5A3E] text-white font-bold text-sm rounded-xl hover:bg-[#34502f] transition-colors disabled:opacity-50 flex items-center justify-center gap-2 mt-2"
           >
             {loading && <RefreshCw className="w-4 h-4 animate-spin" />}
             {loading ? "Signing in…" : "Sign in to Dashboard"}
@@ -121,10 +121,98 @@ function LoginGate({ onSuccess }: { onSuccess: () => void }) {
             ← Back to site
           </Link>
         </div>
+      </div>
+    </div>
+  );
+}
 
-        <p className="text-center text-white/15 text-[10px] font-mono mt-8">
-          admin@invertedcomma.com · admin123
-        </p>
+// ── Change-password modal ─────────────────────────────────────────────────────
+function ChangePasswordModal({ onClose }: { onClose: () => void }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [error, setError] = useState("");
+  const [status, setStatus] = useState<"idle" | "loading" | "done">("idle");
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    if (next.length < 8) return setError("New password must be at least 8 characters.");
+    if (next !== confirm) return setError("New passwords do not match.");
+    setStatus("loading");
+    try {
+      const res = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ currentPassword: current, newPassword: next }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not update password");
+      // Server bumped token_version and returned a fresh token for this session.
+      if (data.token) localStorage.setItem(TOKEN_KEY, data.token);
+      setStatus("done");
+    } catch (err: any) {
+      setError(err.message || "Could not update password");
+      setStatus("idle");
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="font-serif italic font-bold text-xl text-stone-800">Change password</h2>
+          <button onClick={onClose} className="text-stone-400 hover:text-stone-700"><X className="w-4 h-4" /></button>
+        </div>
+
+        {status === "done" ? (
+          <div className="mt-4 text-center">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-emerald-50 mb-3">
+              <CheckCircle className="w-6 h-6 text-emerald-600" />
+            </div>
+            <p className="text-sm text-stone-600 mb-5">Your password has been updated. Other signed-in sessions have been logged out.</p>
+            <button onClick={onClose} className="w-full h-10 rounded-full bg-[#3D5A3E] text-white text-sm font-semibold hover:bg-[#34502f] transition-colors">Done</button>
+          </div>
+        ) : (
+          <form onSubmit={submit} className="space-y-3 mt-4">
+            <p className="text-xs text-stone-400 mb-2">Use a strong, unique password of at least 8 characters.</p>
+            <input
+              type={showPw ? "text" : "password"} value={current} onChange={e => setCurrent(e.target.value)}
+              autoFocus placeholder="Current password" autoComplete="current-password"
+              className="w-full border border-stone-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#3D5A3E]/20 focus:border-[#3D5A3E]/50"
+            />
+            <input
+              type={showPw ? "text" : "password"} value={next} onChange={e => setNext(e.target.value)}
+              placeholder="New password" autoComplete="new-password"
+              className="w-full border border-stone-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#3D5A3E]/20 focus:border-[#3D5A3E]/50"
+            />
+            <input
+              type={showPw ? "text" : "password"} value={confirm} onChange={e => setConfirm(e.target.value)}
+              placeholder="Confirm new password" autoComplete="new-password"
+              className="w-full border border-stone-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#3D5A3E]/20 focus:border-[#3D5A3E]/50"
+            />
+            <label className="flex items-center gap-2 text-xs text-stone-500 cursor-pointer select-none">
+              <input type="checkbox" checked={showPw} onChange={e => setShowPw(e.target.checked)} className="rounded" />
+              Show passwords
+            </label>
+
+            {error && (
+              <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5">
+                <AlertCircle className="w-3.5 h-3.5 text-red-500 mt-0.5 flex-shrink-0" />
+                <p className="text-xs text-red-600">{error}</p>
+              </div>
+            )}
+
+            <button
+              type="submit" disabled={status === "loading"}
+              className="w-full h-10 rounded-full bg-[#3D5A3E] text-white text-sm font-semibold hover:bg-[#34502f] transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {status === "loading" && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {status === "loading" ? "Updating…" : "Update password"}
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );
@@ -2189,6 +2277,7 @@ export default function ControlPage() {
   const [unlocked, setUnlocked] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [pwModalOpen, setPwModalOpen] = useState(false);
 
   const isModerator = user?.role === "moderator";
   const isPrivileged = isAdmin || isModerator;
@@ -2250,6 +2339,13 @@ export default function ControlPage() {
             </div>
           </div>
           <button
+            onClick={() => setPwModalOpen(true)}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-white/40 hover:text-white/80 hover:bg-white/8 transition-all"
+          >
+            <ShieldCheck className="w-4 h-4" />
+            Change password
+          </button>
+          <button
             onClick={handleLogout}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-white/40 hover:text-white/80 hover:bg-white/8 transition-all"
           >
@@ -2258,6 +2354,8 @@ export default function ControlPage() {
           </button>
         </div>
       </aside>
+
+      {pwModalOpen && <ChangePasswordModal onClose={() => setPwModalOpen(false)} />}
 
       {/* Sidebar overlay on mobile */}
       {sidebarOpen && (
