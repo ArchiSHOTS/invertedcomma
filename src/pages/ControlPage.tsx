@@ -708,6 +708,31 @@ function AddQuoteForm({ onSaved, onCancel }: { onSaved: (q: any) => void; onCanc
   );
 }
 
+// ── Reusable pagination ───────────────────────────────────────────────────────
+function Pagination({ page, perPage, total, onPage }: {
+  page: number; perPage: number; total: number; onPage: (p: number) => void;
+}) {
+  const pages = Math.ceil(total / perPage);
+  if (pages <= 1) return null;
+  const btn = "h-8 px-3 rounded-full text-xs font-medium border border-stone-200 text-stone-600 hover:border-stone-400 disabled:opacity-40 disabled:hover:border-stone-200 transition-colors";
+  return (
+    <div className="flex items-center justify-center gap-3 pt-5">
+      <button className={btn} disabled={page <= 1} onClick={() => onPage(page - 1)}>← Prev</button>
+      <span className="text-xs text-stone-500">
+        Page {page} of {pages} · {total.toLocaleString()} items
+      </span>
+      <button className={btn} disabled={page >= pages} onClick={() => onPage(page + 1)}>Next →</button>
+    </div>
+  );
+}
+
+/** Page state that resets to 1 whenever a dependency (search/filter) changes. */
+function usePaged(deps: any[], perPage = 25) {
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, deps);   // eslint-disable-line react-hooks/exhaustive-deps
+  return { page, setPage, perPage, from: (page - 1) * perPage, to: page * perPage };
+}
+
 // ── Quotes tab ────────────────────────────────────────────────────────────────
 function QuotesTab() {
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -726,6 +751,11 @@ function QuotesTab() {
   const [pasteText, setPasteText] = useState("");
   const [pasteExtracting, setPasteExtracting] = useState(false);
   const [pasteExtracted, setPasteExtracted] = useState<any[]>([]);
+
+  // Wikiquote import progress (polled while running)
+  const [wqImport, setWqImport] = useState<null | {
+    running: boolean; imported: number; authorsDone: number; authorsTotal: number; error: string | null;
+  }>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -754,7 +784,29 @@ function QuotesTab() {
       q.category.toLowerCase().includes(term);
     return matchStatus && matchSearch;
   });
+  const paged = usePaged([search, statusFilter]);
 
+
+  const pollImport = useCallback(() => {
+    const tick = async () => {
+      const r = await fetch("/api/admin/import-wikiquote/status", { headers: authHeaders() });
+      const s = await r.json();
+      setWqImport(s);
+      if (s.running) setTimeout(tick, 2000);
+      else load();   // refresh the list when the import finishes
+    };
+    tick();
+  }, [load]);
+
+  const startWikiquoteImport = async () => {
+    if (!confirm("Import ~2,000 attributed quotes from Wikiquote? They'll arrive as 'pending' for your review.")) return;
+    setWqImport({ running: true, imported: 0, authorsDone: 0, authorsTotal: 44, error: null });
+    const res = await fetch("/api/admin/import-wikiquote", {
+      method: "POST", headers: authHeaders(), body: JSON.stringify({ max: 60 }),
+    });
+    if (res.status === 409) { const d = await res.json(); setWqImport(d.status); }
+    pollImport();
+  };
 
   const handleApprove = async (id: string) => {
     await fetch(`/api/admin/quotes/${id}/approve`, { method: "POST", headers: authHeaders() });
@@ -847,8 +899,27 @@ function QuotesTab() {
               {{ manual: "Manual", youtube: "YouTube", paste: "Paste text" }[mode]}
             </button>
           ))}
+          <button
+            onClick={startWikiquoteImport}
+            disabled={!!wqImport?.running}
+            className="flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-medium transition-all border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+          >
+            {wqImport?.running ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+            Wikiquote
+          </button>
         </div>
       </div>
+
+      {/* Import progress */}
+      {wqImport && (
+        <div className={`rounded-xl border px-4 py-3 text-sm ${wqImport.error ? "bg-red-50 border-red-200 text-red-700" : wqImport.running ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-emerald-50 border-emerald-200 text-emerald-800"}`}>
+          {wqImport.error
+            ? `Import failed: ${wqImport.error}`
+            : wqImport.running
+              ? `Importing from Wikiquote… ${wqImport.imported} quotes added (${wqImport.authorsDone}/${wqImport.authorsTotal} authors). You can keep working — this runs in the background.`
+              : `Import complete — ${wqImport.imported} pending quotes added. Review them in the Pending tab below.`}
+        </div>
+      )}
 
       {/* Search + filter bar */}
       <div className="flex flex-wrap gap-3">
@@ -987,12 +1058,7 @@ function QuotesTab() {
           {displayed.length === 0 && (
             <p className="text-sm text-stone-400 text-center italic py-10">No quotes match your filters.</p>
           )}
-          {displayed.length > 200 && (
-            <p className="text-xs text-stone-400 text-center py-2">
-              Showing first 200 of {displayed.length.toLocaleString()} — use search or the status filter to narrow.
-            </p>
-          )}
-          {displayed.slice(0, 200).map(q =>
+          {displayed.slice(paged.from, paged.to).map(q =>
             editingId === q.id ? (
               <div key={q.id} className="bg-stone-50 border border-stone-300 rounded-2xl p-4 space-y-3">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-stone-500">Editing quote</h3>
@@ -1063,6 +1129,7 @@ function QuotesTab() {
               </div>
             )
           )}
+          <Pagination page={paged.page} perPage={paged.perPage} total={displayed.length} onPage={paged.setPage} />
         </div>
       )}
     </div>
@@ -1311,6 +1378,7 @@ function UsersTab({ currentRole }: { currentRole: string }) {
     const matchSearch = !term || u.name.toLowerCase().includes(term) || u.email.toLowerCase().includes(term) || u.handle.toLowerCase().includes(term);
     return matchRole && matchSearch;
   });
+  const paged = usePaged([search, roleFilter]);
 
   const roleBadge = (role: string) => {
     if (role === "admin") return <span className="flex items-center gap-1 text-[10px] font-bold bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full"><Crown className="w-2.5 h-2.5" />Admin</span>;
@@ -1346,7 +1414,7 @@ function UsersTab({ currentRole }: { currentRole: string }) {
       ) : (
         <div className="space-y-2">
           {filtered.length === 0 && <p className="text-sm text-stone-400 italic text-center py-10">No users found.</p>}
-          {filtered.map(u => (
+          {filtered.slice(paged.from, paged.to).map(u => (
             <div key={u.id} className="flex items-center gap-4 p-4 bg-white border border-stone-200 rounded-2xl">
               <img src={u.avatar} alt={u.name} className="w-9 h-9 rounded-full object-cover flex-shrink-0 bg-stone-200" />
               <div className="flex-1 min-w-0">
@@ -1380,6 +1448,7 @@ function UsersTab({ currentRole }: { currentRole: string }) {
               )}
             </div>
           ))}
+          <Pagination page={paged.page} perPage={paged.perPage} total={filtered.length} onPage={paged.setPage} />
         </div>
       )}
 
@@ -1539,6 +1608,7 @@ function SubscribersTab() {
   };
 
   const filtered = subs.filter(s => !search || s.email.toLowerCase().includes(search.toLowerCase()));
+  const paged = usePaged([search]);
 
   return (
     <div className="space-y-6">
@@ -1577,7 +1647,7 @@ function SubscribersTab() {
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100">
-              {filtered.map(s => (
+              {filtered.slice(paged.from, paged.to).map(s => (
                 <tr key={s.id} className="hover:bg-stone-50 transition-colors">
                   <td className="px-5 py-3 font-medium text-stone-700">{s.email}</td>
                   <td className="px-5 py-3 text-stone-500 capitalize">{s.source}</td>
@@ -1586,6 +1656,7 @@ function SubscribersTab() {
               ))}
             </tbody>
           </table>
+          <Pagination page={paged.page} perPage={paged.perPage} total={filtered.length} onPage={paged.setPage} />
         </div>
       )}
     </div>
@@ -1718,6 +1789,7 @@ function AuthorsTab() {
   };
 
   const filtered = authors.filter(a => a.name.toLowerCase().includes(search.toLowerCase()));
+  const paged = usePaged([search]);
 
   return (
     <div>
@@ -1740,7 +1812,7 @@ function AuthorsTab() {
         <div className="space-y-2">{[...Array(6)].map((_, i) => <div key={i} className="h-16 bg-stone-100 rounded-2xl animate-pulse" />)}</div>
       ) : (
         <div className="space-y-2">
-          {filtered.map(author => (
+          {filtered.slice(paged.from, paged.to).map(author => (
             <div key={author.slug} className="bg-white border border-stone-200 rounded-2xl p-4 flex items-start gap-4">
               {/* Avatar */}
               <div className="w-10 h-10 rounded-xl bg-stone-100 flex-shrink-0 flex items-center justify-center overflow-hidden">
@@ -1778,6 +1850,7 @@ function AuthorsTab() {
               </div>
             </div>
           ))}
+          <Pagination page={paged.page} perPage={paged.perPage} total={filtered.length} onPage={paged.setPage} />
         </div>
       )}
 
@@ -2349,6 +2422,7 @@ export default function ControlPage() {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pwModalOpen, setPwModalOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const isModerator = user?.role === "moderator";
   const isPrivileged = isAdmin || isModerator;
@@ -2400,30 +2474,6 @@ export default function ControlPage() {
           })}
         </nav>
 
-        {/* User + logout */}
-        <div className="px-3 py-4 border-t border-white/10">
-          <div className="flex items-center gap-3 px-3 py-2 mb-1">
-            <img src={user?.avatar} alt={user?.name} className="w-7 h-7 rounded-full object-cover bg-white/20 flex-shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-white/80 truncate">{user?.name}</p>
-              <p className="text-[10px] text-white/30 capitalize font-mono">{user?.role}</p>
-            </div>
-          </div>
-          <button
-            onClick={() => setPwModalOpen(true)}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-white/40 hover:text-white/80 hover:bg-white/8 transition-all"
-          >
-            <ShieldCheck className="w-4 h-4" />
-            Change password
-          </button>
-          <button
-            onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-white/40 hover:text-white/80 hover:bg-white/8 transition-all"
-          >
-            <LogOut className="w-4 h-4" />
-            Sign out
-          </button>
-        </div>
       </aside>
 
       {pwModalOpen && <ChangePasswordModal onClose={() => setPwModalOpen(false)} />}
@@ -2457,9 +2507,40 @@ export default function ControlPage() {
               <ExternalLink className="w-3 h-3" />
               <span className="hidden sm:block">View site</span>
             </a>
-            <div className="flex items-center gap-2">
-              <img src={user?.avatar} alt={user?.name} className="w-7 h-7 rounded-full object-cover bg-stone-200" />
-              <span className="hidden sm:block text-xs font-medium text-stone-700">{user?.name}</span>
+            {/* Admin menu */}
+            <div className="relative">
+              <button
+                onClick={() => setMenuOpen(v => !v)}
+                className="flex items-center gap-2 rounded-full hover:bg-stone-100 pl-1 pr-2 py-1 transition-colors"
+              >
+                <img src={user?.avatar} alt={user?.name} className="w-7 h-7 rounded-full object-cover bg-stone-200" />
+                <span className="hidden sm:block text-xs font-medium text-stone-700">{user?.name}</span>
+                <ChevronDown className={`w-3.5 h-3.5 text-stone-400 transition-transform ${menuOpen ? "rotate-180" : ""}`} />
+              </button>
+              {menuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+                  <div className="absolute right-0 mt-2 w-52 bg-white border border-stone-200 rounded-2xl shadow-xl z-50 overflow-hidden py-1">
+                    <div className="px-4 py-3 border-b border-stone-100">
+                      <p className="text-sm font-semibold text-stone-800 truncate">{user?.name}</p>
+                      <p className="text-[11px] text-stone-400 truncate">{user?.email}</p>
+                      <p className="text-[10px] text-stone-400 capitalize font-mono mt-0.5">{user?.role}</p>
+                    </div>
+                    <button
+                      onClick={() => { setMenuOpen(false); setPwModalOpen(true); }}
+                      className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
+                    >
+                      <ShieldCheck className="w-4 h-4 text-stone-400" /> Change password
+                    </button>
+                    <button
+                      onClick={() => { setMenuOpen(false); handleLogout(); }}
+                      className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-rose-600 hover:bg-rose-50 transition-colors"
+                    >
+                      <LogOut className="w-4 h-4" /> Sign out
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </header>

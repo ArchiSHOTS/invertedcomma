@@ -52,6 +52,7 @@ import {
   toggleQuoteLike,
 } from "./db.ts";
 import { sendVerificationEmail, sendWelcomeEmail, type WelcomeQuote } from "./email.ts";
+import { importWikiquote, importStatus } from "./wikiquote.ts";
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
@@ -967,6 +968,22 @@ app.post("/api/admin/quotes/bulk", adminMiddleware, async (req: any, res) => {
       if (enrichment) await updateRuntimeQuote(q.id, { enrichment });
     });
   }
+});
+
+// Kick off a Wikiquote import (runs in the background; quotes land as 'pending').
+app.post("/api/admin/import-wikiquote", adminMiddleware, async (req: any, res) => {
+  if (importStatus.running) {
+    return res.status(409).json({ error: "An import is already running.", status: importStatus });
+  }
+  const maxPerAuthor = Math.min(Math.max(Number(req.body?.max) || 60, 5), 120);
+  // Fire and forget — the admin UI polls /status. Don't await (it takes ~1 min).
+  importWikiquote({ maxPerAuthor }).catch(e => console.error("[wikiquote] import failed:", e?.message));
+  res.status(202).json({ started: true });
+});
+
+// Poll import progress.
+app.get("/api/admin/import-wikiquote/status", adminMiddleware, (_req, res) => {
+  res.json(importStatus);
 });
 
 app.post("/api/admin/quotes/:id/approve", adminMiddleware, async (req, res) => {
