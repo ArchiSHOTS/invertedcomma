@@ -29,6 +29,13 @@ let jwt: any = null;
 try { bcrypt = (await import("bcrypt")).default; } catch { console.warn("[auth] bcrypt not installed — run: npm install bcrypt @types/bcrypt"); }
 try { jwt = (await import("jsonwebtoken")).default; } catch { console.warn("[auth] jsonwebtoken not installed — run: npm install jsonwebtoken @types/jsonwebtoken"); }
 
+// Google OAuth — server-side ID token verification
+let googleClient: any = null;
+try {
+  const { OAuth2Client } = await import("google-auth-library");
+  googleClient = new OAuth2Client();
+} catch { console.warn("[auth] google-auth-library not installed — Google sign-in disabled"); }
+
 dotenv.config();
 
 // ── Database ──────────────────────────────────────────────────────────────────
@@ -256,6 +263,7 @@ async function generateWithFallback(
 // ── Auth constants ────────────────────────────────────────────────────────────
 const JWT_SECRET = process.env.JWT_SECRET || "ic-dev-secret-change-in-production";
 const SALT_ROUNDS = 10;
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 
 // Custom tags added at runtime (admin-only, in-memory is fine — low-churn)
 const customTags: string[] = [];
@@ -517,13 +525,28 @@ app.post("/api/auth/forgot-password", validate(ForgotPasswordSchema), async (req
 
 app.post("/api/auth/google", async (req, res) => {
   if (!jwt) return res.status(503).json({ error: "Auth packages not installed." });
+  if (!googleClient || !GOOGLE_CLIENT_ID) {
+    return res.status(503).json({ error: "Google sign-in is not configured on the server." });
+  }
   const { credential } = req.body;
   if (!credential) return res.status(400).json({ error: "Google credential required" });
-  try {
-    const [, payloadB64] = credential.split(".");
-    const { sub: googleId, email, name, picture } = JSON.parse(Buffer.from(payloadB64, "base64").toString("utf8"));
-    if (!email) return res.status(400).json({ error: "Could not extract email from Google token" });
 
+  try {
+    // Cryptographically verify the ID token: checks Google's signature, that the
+    // token was issued for OUR client (audience), the issuer, and expiry.
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    if (!payload || !payload.email) {
+      return res.status(400).json({ error: "Could not verify Google account" });
+    }
+    if (payload.email_verified === false) {
+      return res.status(403).json({ error: "Your Google email is not verified" });
+    }
+
+    const { sub: googleId, email, name, picture } = payload;
     let user = await getUserByEmail(email);
     if (!user) {
       const id = "user_google_" + googleId;
@@ -535,8 +558,9 @@ app.post("/api/auth/google", async (req, res) => {
       });
     }
     res.json({ token: signToken(user.id), user: sanitiseUser(user) });
-  } catch {
-    res.status(400).json({ error: "Invalid Google credential" });
+  } catch (err: any) {
+    console.warn("[auth] Google verification failed:", err.message);
+    res.status(401).json({ error: "Invalid or expired Google credential" });
   }
 });
 
