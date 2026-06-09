@@ -428,19 +428,12 @@ export default function QuotePage() {
               </button>
 
               <button
-                onClick={handleShare}
-                className="flex items-center gap-2 h-10 px-4 rounded-full text-sm font-medium border border-stone-200 text-stone-500 hover:border-stone-400 transition-all"
-              >
-                {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Share2 className="w-4 h-4" />}
-                <span className="hidden sm:inline">{copied ? "Copied!" : "Share"}</span>
-              </button>
-
-              <button
                 onClick={() => setShowShareModal(true)}
                 className="flex items-center gap-2 h-10 px-4 rounded-full text-sm font-semibold text-white border transition-all hover:opacity-90"
                 style={{ background: BRAND, borderColor: BRAND }}
               >
-                Share card ↗
+                <Share2 className="w-4 h-4" />
+                Share
               </button>
 
               <a

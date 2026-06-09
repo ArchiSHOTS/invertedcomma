@@ -81,33 +81,11 @@ export default function HeroSection({ quotes, onShareCard }: HeroSectionProps) {
           )}
         </cite>
 
-        {/* Action buttons */}
-        <div className="flex items-center justify-center gap-3 flex-wrap">
-          <button
-            onClick={handleLike}
-            className={`flex items-center gap-2 h-10 px-5 rounded-full text-sm font-medium transition-all duration-200 ${
-              liked
-                ? "bg-rose-500 text-white shadow-lg shadow-rose-900/40"
-                : "bg-white/15 text-white hover:bg-white/25"
-            }`}
-          >
-            <Heart className={`w-4 h-4 transition-all ${liked ? "fill-white scale-110" : ""}`} />
-            {likeCount.toLocaleString()}
-          </button>
-
-          {onShareCard && (
-            <button
-              onClick={() => onShareCard(featured)}
-              className="flex items-center gap-2 h-10 px-5 rounded-full text-sm font-medium bg-white/15 text-white hover:bg-white/25 transition-all"
-            >
-              <Share2 className="w-4 h-4" />
-              Share card
-            </button>
-          )}
-
+        {/* Action — Deep dive only */}
+        <div className="flex items-center justify-center">
           <Link
             to={`/q/${featured.slug}`}
-            className="flex items-center gap-2 h-10 px-6 rounded-full text-sm font-semibold bg-white text-[#1E3320] hover:bg-emerald-50 transition-all shadow-lg shadow-black/20"
+            className="flex items-center gap-2 h-11 px-7 rounded-full text-sm font-semibold bg-white text-[#1E3320] hover:bg-emerald-50 transition-all shadow-lg shadow-black/20"
           >
             Deep dive
             <ArrowRight className="w-4 h-4" />

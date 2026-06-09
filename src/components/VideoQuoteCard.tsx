@@ -135,7 +135,7 @@ export default function VideoQuoteCard({ quote, onOpenDiscussion, onShareCard }:
                 onClick={onShareCard}
                 className="h-8 px-3 border border-[#E5E1D9] rounded-full text-[10px] font-mono text-[#6B665E] hover:bg-[#F5F2ED] transition-colors"
               >
-                Share card
+                Share
               </button>
             )}
           </div>

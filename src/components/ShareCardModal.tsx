@@ -312,7 +312,7 @@ export default function ShareCardModal({ quote, onClose }: ShareCardModalProps) 
 
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-4 border-b border-stone-200 flex-shrink-0">
-            <h2 className="font-serif italic font-bold text-stone-800 text-lg">Share card</h2>
+            <h2 className="font-serif italic font-bold text-stone-800 text-lg">Share</h2>
             <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-stone-500 hover:bg-stone-200 transition-colors">
               <X className="w-4 h-4" />
             </button>
