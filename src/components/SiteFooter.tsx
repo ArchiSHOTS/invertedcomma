@@ -47,8 +47,8 @@ export default function SiteFooter() {
     <footer className="bg-[#0F1F10] text-white">
 
       {/* ── Top band: Logo · tagline · newsletter ─────────────────────── */}
-      <div className="max-w-6xl mx-auto px-6 md:px-10 pt-14 pb-12">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-10 md:gap-8 items-start">
+      <div className="max-w-6xl mx-auto px-6 md:px-10 pt-10 pb-8 md:pt-14 md:pb-12">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-7 md:gap-8 items-start">
 
           {/* Logo + tagline */}
           <div>
@@ -107,8 +107,8 @@ export default function SiteFooter() {
       {/* ── Divider ───────────────────────────────────────────────────── */}
       <div className="border-t border-white/10" />
 
-      {/* ── Bottom 3-column grid ──────────────────────────────────────── */}
-      <div className="max-w-6xl mx-auto px-6 md:px-10 py-10 grid grid-cols-1 sm:grid-cols-3 gap-10">
+      {/* ── Bottom grid — compact on mobile: [Social | Navigate] then Legal ─ */}
+      <div className="max-w-6xl mx-auto px-6 md:px-10 py-7 md:py-10 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-7 sm:gap-10">
 
         {/* Col 1 — Social: icon-only row */}
         <div>
@@ -136,20 +136,21 @@ export default function SiteFooter() {
           <p className="text-[9px] font-bold uppercase tracking-[0.22em] text-stone-500 mb-4">
             Navigate
           </p>
-          <div className="flex flex-col gap-3 text-sm text-stone-400">
+          <div className="flex flex-col gap-2.5 text-sm text-stone-400">
             <a href="#explore"  className="hover:text-white transition-colors">Explore quotes</a>
+            {/* TODO: add <Link to="/participate">Participate</Link> here (future phase) */}
             <Link to="/about"   className="hover:text-white transition-colors">About</Link>
             <Link to="/terms"   className="hover:text-white transition-colors">Terms of use</Link>
             <Link to="/privacy" className="hover:text-white transition-colors">Privacy policy</Link>
           </div>
         </div>
 
-        {/* Col 3 — Legal */}
-        <div>
+        {/* Col 3 — Legal (full-width row beneath the link columns on mobile) */}
+        <div className="col-span-2 sm:col-span-1">
           <p className="text-[9px] font-bold uppercase tracking-[0.22em] text-stone-500 mb-4">
             Legal
           </p>
-          <div className="space-y-3 text-xs text-stone-500 leading-relaxed">
+          <div className="space-y-2 text-xs text-stone-500 leading-relaxed">
             <p>
               Some links on this site are affiliate links. We may earn a small
               commission at no extra cost to you.

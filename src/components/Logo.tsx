@@ -31,11 +31,19 @@ export default function Logo({
   const aspect = iconOnly ? ICON_ASPECT : FULL_ASPECT;
   const w = Math.round(size * aspect);
 
+  // Default the element to `block`, but only when the caller hasn't supplied their
+  // own display utility (e.g. `hidden md:block`). Mixing a default `block` with a
+  // caller `hidden` would make the winner depend on stylesheet order — avoid that.
+  const hasDisplayClass = /\b(hidden|block|inline|flex|grid|contents)\b/.test(className);
+  const displayClass = hasDisplayClass ? "" : "block";
+
   // For icon-only we clip to the left 28% of the image via object-position + overflow hidden
+  // NOTE: do NOT set `display` here — an inline display overrides Tailwind's responsive
+  // `hidden`/`md:block` classes (this caused the "two logos on mobile" bug). Display is
+  // controlled via className instead.
   const style: React.CSSProperties = {
     width: w,
     height: size,
-    display: "block",
     flexShrink: 0,
     // Invert to white for dark backgrounds, then re-tint green
     filter: light ? "brightness(0) invert(1) sepia(1) saturate(0.3) hue-rotate(80deg)" : undefined,
@@ -56,6 +64,7 @@ export default function Logo({
           alt=""
           width={fullW}
           height={size}
+          className="block"
           style={{ ...style, width: fullW, objectPosition: "left center", objectFit: "cover" }}
           draggable={false}
         />
@@ -70,7 +79,7 @@ export default function Logo({
       width={w}
       height={size}
       style={style}
-      className={className}
+      className={`${displayClass} ${className}`.trim()}
       draggable={false}
     />
   );

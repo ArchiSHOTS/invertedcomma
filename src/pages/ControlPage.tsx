@@ -1408,8 +1408,8 @@ function SubscribersTab() {
           <p className="text-stone-400 text-xs mt-1">The newsletter form on quote pages will populate this list.</p>
         </div>
       ) : (
-        <div className="bg-white border border-stone-200 rounded-2xl overflow-hidden">
-          <table className="w-full text-xs">
+        <div className="bg-white border border-stone-200 rounded-2xl overflow-x-auto">
+          <table className="w-full min-w-[480px] text-xs">
             <thead>
               <tr className="border-b border-stone-100 bg-stone-50">
                 <th className="text-left px-5 py-3 font-bold text-stone-500 uppercase tracking-wider text-[10px]">Email</th>
@@ -1487,8 +1487,8 @@ function AITab() {
 
       <div>
         <p className="text-[10px] font-bold uppercase tracking-widest text-stone-400 mb-3">Cost by feature</p>
-        <div className="bg-white border border-stone-200 rounded-2xl overflow-hidden">
-          <table className="w-full text-xs">
+        <div className="bg-white border border-stone-200 rounded-2xl overflow-x-auto">
+          <table className="w-full min-w-[560px] text-xs">
             <thead>
               <tr className="border-b border-stone-100 bg-stone-50">
                 {["Feature", "Model", "Avg tokens", "Est. cost"].map(h => (
