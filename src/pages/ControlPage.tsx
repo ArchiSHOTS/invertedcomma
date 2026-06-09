@@ -729,10 +729,17 @@ function QuotesTab() {
 
   const load = useCallback(() => {
     setLoading(true);
-    fetch("/api/quotes")
-      .then(r => r.json())
-      .then(d => setQuotes(d.quotes || []))
-      .finally(() => setLoading(false));
+    // Merge the public list (seed + published) with the admin list (ALL runtime
+    // quotes incl. pending/rejected) so the moderation queue is visible.
+    Promise.all([
+      fetch("/api/quotes").then(r => r.json()).catch(() => ({ quotes: [] })),
+      fetch("/api/admin/quotes", { headers: authHeaders() }).then(r => r.json()).catch(() => ({ quotes: [] })),
+    ]).then(([pub, adm]) => {
+      const map = new Map<string, Quote>();
+      (pub.quotes || []).forEach((q: Quote) => map.set(q.id, { ...q, status: (q.status || "published") as Quote["status"] }));
+      (adm.quotes || []).forEach((q: Quote) => map.set(q.id, q)); // admin row wins (true status)
+      setQuotes([...map.values()]);
+    }).finally(() => setLoading(false));
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -980,7 +987,12 @@ function QuotesTab() {
           {displayed.length === 0 && (
             <p className="text-sm text-stone-400 text-center italic py-10">No quotes match your filters.</p>
           )}
-          {displayed.map(q =>
+          {displayed.length > 200 && (
+            <p className="text-xs text-stone-400 text-center py-2">
+              Showing first 200 of {displayed.length.toLocaleString()} — use search or the status filter to narrow.
+            </p>
+          )}
+          {displayed.slice(0, 200).map(q =>
             editingId === q.id ? (
               <div key={q.id} className="bg-stone-50 border border-stone-300 rounded-2xl p-4 space-y-3">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-stone-500">Editing quote</h3>
