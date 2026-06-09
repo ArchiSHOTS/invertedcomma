@@ -53,6 +53,19 @@ const GREEN = "#3D5A3E";
 const DARK = "#0F1F10";
 const CREAM = "#FBF9F6";
 
+const SOCIALS = [
+  { name: "instagram", url: "https://instagram.com/invertedcommahq" },
+  { name: "x",         url: "https://x.com/invertedcommahq" },
+  { name: "pinterest", url: "https://pinterest.com/invertedcommahq" },
+];
+
+function socialRow(): string {
+  return SOCIALS.map(s =>
+    `<a href="${s.url}" style="text-decoration:none;display:inline-block;margin:0 4px;">` +
+    `<img src="${SITE_URL}/email/${s.name}.png" width="30" height="30" alt="${s.name}" style="display:inline-block;border:0;border-radius:50%;"></a>`
+  ).join("");
+}
+
 function layout(bodyHtml: string): string {
   return `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -60,14 +73,16 @@ function layout(bodyHtml: string): string {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${CREAM};padding:32px 16px;">
     <tr><td align="center">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border:1px solid #e7e5e4;border-radius:16px;overflow:hidden;">
-        <tr><td style="background:${DARK};padding:24px 32px;">
-          <span style="color:#ffffff;font-size:18px;font-weight:700;letter-spacing:1px;">INVERTED&nbsp;COMMA</span>
+        <tr><td align="center" style="background:${DARK};padding:26px 32px;">
+          <img src="${SITE_URL}/email/logo-white.png" height="30" alt="Inverted Comma"
+               style="display:block;height:30px;width:auto;border:0;">
         </td></tr>
         <tr><td style="padding:32px;">
           ${bodyHtml}
         </td></tr>
-        <tr><td style="padding:20px 32px;border-top:1px solid #f0eeec;">
-          <p style="margin:0;color:#a8a29e;font-size:12px;line-height:1.6;">
+        <tr><td align="center" style="padding:24px 32px;border-top:1px solid #f0eeec;">
+          <p style="margin:0 0 12px;">${socialRow()}</p>
+          <p style="margin:0;color:#a8a29e;font-size:12px;line-height:1.7;">
             Quotes worth thinking about.<br>
             <a href="${SITE_URL}" style="color:${GREEN};text-decoration:none;">invertedcomma.com</a>
           </p>
@@ -100,21 +115,49 @@ export async function sendVerificationEmail(to: string, name: string, verifyUrl:
   return sendEmail({ to, subject: "Confirm your email — Inverted Comma", html });
 }
 
-export async function sendWelcomeEmail(to: string, name: string): Promise<boolean> {
-  const html = layout(`
-    <h1 style="margin:0 0 12px;font-size:22px;font-weight:700;">Welcome, ${escapeHtml(name)} 👋</h1>
-    <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#44403c;">
-      You're in. Inverted Comma is a home for quotes worth thinking about — drawn from books, films, speeches, art and essays, each with context, sources and a thoughtful counterpoint.
+export interface WelcomeQuote {
+  text: string;
+  author: string;
+  context?: string;
+  tag?: string;     // the interest this was matched on (if any)
+  url: string;      // deep-dive link
+}
+
+export function welcomeEmailHtml(name: string, quote?: WelcomeQuote | null): string {
+  const quoteBlock = quote ? `
+    <p style="margin:0 0 10px;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:${GREEN};">
+      ${quote.tag ? `A quote on ${escapeHtml(quote.tag)}, for you` : "A quote to begin with"}
     </p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${CREAM};border:1px solid #ece9e4;border-radius:14px;margin:0 0 20px;">
+      <tr><td style="padding:22px 22px 18px;">
+        <p style="margin:0 0 12px;font-family:Georgia,'Times New Roman',serif;font-style:italic;font-size:19px;line-height:1.5;color:#1c1917;">
+          &ldquo;${escapeHtml(quote.text)}&rdquo;
+        </p>
+        <p style="margin:0;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#57534e;">
+          — ${escapeHtml(quote.author)}
+        </p>
+        ${quote.context ? `<p style="margin:14px 0 0;font-size:13px;line-height:1.6;color:#78716c;">${escapeHtml(quote.context)}</p>` : ""}
+      </td></tr>
+    </table>
+    <p style="margin:0 0 26px;">${button(quote.url, "Deep dive into this quote →")}</p>
+  ` : `
     <p style="margin:0 0 24px;">${button(SITE_URL + "/explore", "Start exploring")}</p>
-    <p style="margin:0;font-size:14px;line-height:1.7;color:#44403c;">
-      A few things to try:<br>
-      • <strong>Save</strong> quotes that resonate to your collection<br>
-      • <strong>Deep dive</strong> into the meaning and history behind a quote<br>
-      • <strong>Share</strong> a beautifully designed quote card
+  `;
+
+  return layout(`
+    <h1 style="margin:0 0 10px;font-size:22px;font-weight:700;">Welcome, ${escapeHtml(name)} 👋</h1>
+    <p style="margin:0 0 22px;font-size:15px;line-height:1.6;color:#44403c;">
+      You're in — your email is verified. Here's a thought to start with.
+    </p>
+    ${quoteBlock}
+    <p style="margin:0;font-size:14px;line-height:1.7;color:#78716c;">
+      Save quotes that resonate, follow the deep dives, and share beautifully designed cards. Glad to have you.
     </p>
   `);
-  return sendEmail({ to, subject: "Welcome to Inverted Comma", html });
+}
+
+export async function sendWelcomeEmail(to: string, name: string, quote?: WelcomeQuote | null): Promise<boolean> {
+  return sendEmail({ to, subject: "Welcome to Inverted Comma", html: welcomeEmailHtml(name, quote) });
 }
 
 function escapeHtml(s: string): string {

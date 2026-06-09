@@ -51,7 +51,7 @@ import {
   getInsight, setInsight,
   toggleQuoteLike,
 } from "./db.ts";
-import { sendVerificationEmail, sendWelcomeEmail } from "./email.ts";
+import { sendVerificationEmail, sendWelcomeEmail, type WelcomeQuote } from "./email.ts";
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
@@ -452,6 +452,49 @@ function dispatchVerification(user: { id: string; email: string; displayName?: s
     .catch(e => console.warn("[email] verification dispatch failed:", e?.message));
 }
 
+/** Pick a published quote matching one of the user's interests (random fallback). */
+async function pickWelcomeQuote(interests: string[] = []): Promise<WelcomeQuote | null> {
+  const dbRQ = await getRuntimeQuotes("published");
+  const all  = [...getEnrichedQuotes(), ...dbRQ] as any[];
+  if (!all.length) return null;
+
+  const set = new Set((interests || []).map(s => s.toLowerCase()));
+  let pool = all;
+  if (set.size) {
+    const matches = all.filter((q: any) =>
+      (q.tags || []).some((t: string) => set.has(String(t).toLowerCase())) ||
+      set.has(String(q.category || "").toLowerCase())
+    );
+    if (matches.length) pool = matches;
+  }
+
+  const q = pool[Math.floor(Math.random() * pool.length)];
+  if (!q) return null;
+
+  const matchedTag = set.size
+    ? ((q.tags || []).find((t: string) => set.has(String(t).toLowerCase()))
+        || (set.has(String(q.category || "").toLowerCase()) ? q.category : undefined))
+    : undefined;
+
+  return {
+    text: q.text,
+    author: q.author,
+    context: q.context || "",
+    tag: matchedTag,
+    url: `${SITE_URL}/q/${q.slug}`,
+  };
+}
+
+/** Fire-and-forget: email the welcome note with a personalised quote. */
+async function dispatchWelcome(user: { email: string; displayName?: string; name?: string; interests?: string[] }) {
+  try {
+    const quote = await pickWelcomeQuote(user.interests);
+    await sendWelcomeEmail(user.email, user.displayName || user.name || "there", quote);
+  } catch (e: any) {
+    console.warn("[email] welcome dispatch failed:", e?.message);
+  }
+}
+
 // Reject a token whose embedded version no longer matches the user's current
 // token_version (bumped on password change → invalidates older/stolen sessions).
 function tokenVersionStale(payload: { tv?: number }, user: { tokenVersion?: number }) {
@@ -618,8 +661,7 @@ app.post("/api/auth/verify-email", async (req, res) => {
 
   if (!user.emailVerified) {
     await updateUser(user.id, { emailVerified: true });
-    sendWelcomeEmail(user.email, user.displayName || "there")
-      .catch(e => console.warn("[email] welcome dispatch failed:", e?.message));
+    dispatchWelcome(user); // personalised quote based on their interests
   }
   res.json({ ok: true, alreadyVerified: user.emailVerified });
 });
@@ -667,8 +709,7 @@ app.post("/api/auth/google", async (req, res) => {
         avatar: picture || `https://ui-avatars.com/api/?name=${encodeURIComponent(name || "User")}&background=3D5A3E&color=fff&size=100`,
         interests: [], emailVerified: true,
       });
-      sendWelcomeEmail(user.email, user.displayName || "there")
-        .catch(e => console.warn("[email] welcome dispatch failed:", e?.message));
+      dispatchWelcome(user); // Google users have no interests yet → random quote
     }
     res.json({ token: signToken(user.id, user.tokenVersion), user: sanitiseUser(user) });
   } catch (err: any) {
