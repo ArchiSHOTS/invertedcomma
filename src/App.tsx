@@ -223,11 +223,11 @@ function HomePage() {
           <h2 className="font-serif italic text-3xl md:text-4xl lg:text-5xl text-stone-800 font-bold mb-1">
             Explore quotes
           </h2>
-          <p className="text-stone-400 text-sm">
-            {isFiltered
-              ? `${filteredQuotes.length} of ${quotes.length} quotes`
-              : `${featuredSample.length} featured · ${quotes.length} total`}
-          </p>
+          {isFiltered && (
+            <p className="text-stone-400 text-sm">
+              {filteredQuotes.length} of {quotes.length} quotes
+            </p>
+          )}
         </div>
 
         {/* Search bar — centered */}
