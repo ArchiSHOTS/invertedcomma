@@ -1,10 +1,12 @@
 /**
- * Inverted Comma logo — served from /public/logo.svg.
+ * Inverted Comma logo.
+ *   - Full wordmark: /public/logo.svg
+ *   - iconOnly mark: /public/icon.png (speech-bubble glyph, for compact/mobile use)
  *
  * Props:
- *   size      — controls height in px; width scales with the 1410×383 aspect ratio
+ *   size      — controls height in px; width scales with the image aspect ratio
  *   light     — invert colours for use on dark backgrounds
- *   iconOnly  — show only the left ~30% (speech bubbles, no text)
+ *   iconOnly  — render the speech-bubble mark instead of the wordmark
  *   className — extra Tailwind classes
  */
 import React from "react";
@@ -16,11 +18,11 @@ interface LogoProps {
   className?: string;
 }
 
-// Natural aspect ratio of the SVG: 1410 / 383 ≈ 3.68
+// Natural aspect ratio of the wordmark SVG: 1410 / 383 ≈ 3.68
 const FULL_ASPECT = 1410 / 383;
 
-// The two speech bubbles occupy roughly the left 28% of the canvas
-const ICON_ASPECT = 0.28 * FULL_ASPECT; // ≈ 1.03 — nearly square
+// iconOnly uses the dedicated icon.png (the speech-bubble mark): 527 × 384
+const ICON_ASPECT = 527 / 384; // ≈ 1.37
 
 export default function Logo({
   size = 40,
@@ -50,25 +52,17 @@ export default function Logo({
   };
 
   if (iconOnly) {
-    // Show only the left portion (speech bubbles) by putting the full image inside
-    // a clipped container sized to the icon width
-    const fullW = Math.round(size * FULL_ASPECT);
+    // Dedicated speech-bubble mark (public/icon.png)
     return (
-      <div
-        className={`overflow-hidden flex-shrink-0 ${className}`}
-        style={{ width: w, height: size }}
-        aria-label="Inverted Comma"
-      >
-        <img
-          src="/logo.svg"
-          alt=""
-          width={fullW}
-          height={size}
-          className="block"
-          style={{ ...style, width: fullW, objectPosition: "left center", objectFit: "cover" }}
-          draggable={false}
-        />
-      </div>
+      <img
+        src="/icon.png"
+        alt="Inverted Comma"
+        width={w}
+        height={size}
+        style={style}
+        className={`${displayClass} ${className}`.trim()}
+        draggable={false}
+      />
     );
   }
 
