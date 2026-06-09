@@ -1125,13 +1125,15 @@ function QuotesTab() {
           {displayed.length === 0 && (
             <p className="text-sm text-stone-400 text-center italic py-10">No quotes match your filters.</p>
           )}
-          {/* Select all checkbox */}
+          {/* Select all checkbox — selects EVERY quote matching the current filter, not just this page */}
           {displayed.length > 0 && (
-            <div className="px-4 py-2 flex items-center gap-2">
+            <label className="px-4 py-2 flex items-center gap-2 cursor-pointer">
               <input type="checkbox" checked={selected.size > 0 && selected.size === displayed.length}
                 onChange={toggleSelectAll} className="w-4 h-4 cursor-pointer" />
-              <label className="text-xs text-stone-500 cursor-pointer">Select all ({displayed.length} on this page)</label>
-            </div>
+              <span className="text-xs text-stone-500">
+                Select all <strong>{displayed.length.toLocaleString()}</strong> {statusFilter === "all" ? "quotes" : statusFilter} matching this filter
+              </span>
+            </label>
           )}
           {displayed.slice(paged.from, paged.to).map(q =>
             editingId === q.id ? (

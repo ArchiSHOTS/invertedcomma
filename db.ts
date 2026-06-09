@@ -283,6 +283,23 @@ export async function deleteRuntimeQuote(id: string) {
   await pool.query("DELETE FROM runtime_quotes WHERE id=$1", [id]);
 }
 
+/** Set status on many runtime quotes in a single query (by id list or by current-status filter). */
+export async function bulkSetRuntimeQuoteStatus(
+  newStatus: string,
+  opts: { ids?: string[]; whereStatus?: string; whereSourceType?: string }
+): Promise<number> {
+  const where: string[] = [];
+  const params: any[] = [newStatus];
+  if (opts.ids && opts.ids.length) { params.push(opts.ids); where.push(`id = ANY($${params.length}::text[])`); }
+  if (opts.whereStatus)     { params.push(opts.whereStatus);     where.push(`status = $${params.length}`); }
+  if (opts.whereSourceType) { params.push(opts.whereSourceType); where.push(`source_type = $${params.length}`); }
+  if (where.length === 0) return 0;
+  const { rowCount } = await pool.query(
+    `UPDATE runtime_quotes SET status=$1 WHERE ${where.join(" AND ")}`, params
+  );
+  return rowCount ?? 0;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // COMMENTS / DISCUSSIONS
 // ─────────────────────────────────────────────────────────────────────────────
