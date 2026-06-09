@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import Logo from "./Logo";
 import UserBadge from "./UserBadge";
+import VerifyEmailBanner from "./VerifyEmailBanner";
 
 export default function SiteHeader() {
   const [scrolled, setScrolled] = useState(false);
@@ -14,8 +15,10 @@ export default function SiteHeader() {
   }, []);
 
   return (
-    /* pointer-events-none on the outer header so the transparent gap
-       around the floating pill doesn't block page clicks */
+   <>
+    <VerifyEmailBanner />
+    {/* pointer-events-none on the outer header so the transparent gap
+       around the floating pill doesn't block page clicks */}
     <header className="sticky top-0 z-50 pointer-events-none">
       <div
         className={`pointer-events-auto transition-all duration-300 ease-out ${
@@ -61,5 +64,6 @@ export default function SiteHeader() {
         </div>
       </div>
     </header>
+   </>
   );
 }

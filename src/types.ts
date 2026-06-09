@@ -88,6 +88,7 @@ export interface User {
   savedQuoteIds: string[];
   submittedQuoteIds: string[];
   isSubscribed: boolean;    // newsletter
+  emailVerified?: boolean;  // email address confirmed via verification link
   interests: string[];      // topic tags for personalised newsletter
 }
 

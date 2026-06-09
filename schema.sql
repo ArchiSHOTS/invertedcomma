@@ -16,9 +16,12 @@ CREATE TABLE IF NOT EXISTS users (
   submitted_quote_ids TEXT[]  NOT NULL DEFAULT '{}',
   is_subscribed       BOOLEAN NOT NULL DEFAULT false,
   anonymous           BOOLEAN NOT NULL DEFAULT false,
+  email_verified      BOOLEAN NOT NULL DEFAULT false,
   token_version       INTEGER NOT NULL DEFAULT 0,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Migration for existing databases (idempotent):
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT false;
 
 -- ── Authors ──────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS authors (

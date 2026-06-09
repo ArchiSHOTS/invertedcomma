@@ -35,6 +35,14 @@ export async function testConnection() {
   }
 }
 
+/** Idempotent schema migrations — safe to run on every boot. */
+export async function runMigrations() {
+  await pool.query(
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT false"
+  );
+  console.log("[db] Migrations applied ✓");
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // USERS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -53,6 +61,7 @@ export interface DbUser {
   submitted_quote_ids: string[];
   is_subscribed: boolean;
   anonymous: boolean;
+  email_verified: boolean;
   token_version: number;
   created_at: string;
 }
@@ -73,6 +82,7 @@ export function rowToUser(r: DbUser) {
     submittedQuoteIds: r.submitted_quote_ids ?? [],
     isSubscribed: r.is_subscribed ?? false,
     anonymous: r.anonymous ?? false,
+    emailVerified: r.email_verified ?? false,
     tokenVersion: r.token_version ?? 0,
     createdAt: r.created_at,
   };
@@ -105,13 +115,14 @@ export async function getAllUsers() {
 export async function createUser(u: {
   id: string; email: string; passwordHash: string; displayName: string;
   handle: string; avatar: string; interests: string[]; role?: string;
+  emailVerified?: boolean;
 }) {
   const { rows } = await pool.query<DbUser>(
-    `INSERT INTO users (id, email, password_hash, display_name, handle, avatar, interests, role)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `INSERT INTO users (id, email, password_hash, display_name, handle, avatar, interests, role, email_verified)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      RETURNING *`,
     [u.id, u.email.toLowerCase(), u.passwordHash, u.displayName,
-     u.handle, u.avatar, u.interests, u.role ?? "user"]
+     u.handle, u.avatar, u.interests, u.role ?? "user", u.emailVerified ?? false]
   );
   return rowToUser(rows[0]);
 }
@@ -120,6 +131,7 @@ export async function updateUser(id: string, fields: Partial<{
   email: string; passwordHash: string;
   displayName: string; handle: string; avatar: string; bio: string;
   anonymous: boolean; interests: string[]; isSubscribed: boolean;
+  emailVerified: boolean;
   role: string; savedQuoteIds: string[]; tokenVersion: number;
 }>) {
   const sets: string[] = [];
@@ -134,6 +146,7 @@ export async function updateUser(id: string, fields: Partial<{
   if (fields.anonymous     !== undefined) { sets.push(`anonymous=$${i++}`);           vals.push(fields.anonymous); }
   if (fields.interests     !== undefined) { sets.push(`interests=$${i++}`);           vals.push(fields.interests); }
   if (fields.isSubscribed  !== undefined) { sets.push(`is_subscribed=$${i++}`);       vals.push(fields.isSubscribed); }
+  if (fields.emailVerified !== undefined) { sets.push(`email_verified=$${i++}`);       vals.push(fields.emailVerified); }
   if (fields.role          !== undefined) { sets.push(`role=$${i++}`);                vals.push(fields.role); }
   if (fields.savedQuoteIds !== undefined) { sets.push(`saved_quote_ids=$${i++}`);     vals.push(fields.savedQuoteIds); }
   if (fields.tokenVersion  !== undefined) { sets.push(`token_version=$${i++}`);       vals.push(fields.tokenVersion); }

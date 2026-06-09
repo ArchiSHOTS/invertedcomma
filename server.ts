@@ -40,7 +40,7 @@ dotenv.config();
 
 // ── Database ──────────────────────────────────────────────────────────────────
 import {
-  testConnection,
+  testConnection, runMigrations,
   getUserById, getUserByEmail, getUserByHandle, getAllUsers,
   createUser, updateUser, deleteUser, toggleBookmark,
   getAuthorBySlug, getAllAuthors, upsertAuthor,
@@ -51,6 +51,7 @@ import {
   getInsight, setInsight,
   toggleQuoteLike,
 } from "./db.ts";
+import { sendVerificationEmail, sendWelcomeEmail } from "./email.ts";
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
@@ -146,6 +147,8 @@ app.use("/api/auth/login",           authLimiter);
 app.use("/api/auth/register",        authLimiter);
 app.use("/api/auth/forgot-password", authLimiter);
 app.use("/api/auth/change-password", authLimiter);
+app.use("/api/auth/verify-email",        authLimiter);
+app.use("/api/auth/resend-verification", authLimiter);
 app.use("/api/quotes/:id/insights",  aiLimiter);
 app.use("/api/discussions/:id/ai-counterpoint", aiLimiter);
 app.use("/api/admin/extract-youtube", aiLimiter);
@@ -416,6 +419,7 @@ function sanitiseUser(u: any) {
     savedQuoteIds:    u.savedQuoteIds || [],
     submittedQuoteIds:u.submittedQuoteIds || [],
     isSubscribed:     u.isSubscribed || false,
+    emailVerified:    u.emailVerified || false,
     interests:        u.interests || [],
   };
 }
@@ -428,6 +432,24 @@ function signToken(userId: string, tokenVersion = 0): string {
 function verifyToken(token: string): { sub: string; tv?: number } | null {
   if (!jwt) return null;
   try { return jwt.verify(token, JWT_SECRET) as { sub: string; tv?: number }; } catch { return null; }
+}
+
+// Short-lived, single-purpose token for email verification links.
+const SITE_URL = process.env.SITE_URL || "https://www.invertedcomma.com";
+function signVerifyToken(userId: string): string {
+  return jwt.sign({ sub: userId, purpose: "verify" }, JWT_SECRET, { expiresIn: "24h" });
+}
+function verifyVerifyToken(token: string): string | null {
+  try {
+    const p = jwt.verify(token, JWT_SECRET) as { sub: string; purpose?: string };
+    return p.purpose === "verify" ? p.sub : null;
+  } catch { return null; }
+}
+/** Fire-and-forget: email a verification link to the user. */
+function dispatchVerification(user: { id: string; email: string; displayName?: string; name?: string }) {
+  const url = `${SITE_URL}/auth/verify?token=${signVerifyToken(user.id)}`;
+  sendVerificationEmail(user.email, user.displayName || user.name || "there", url)
+    .catch(e => console.warn("[email] verification dispatch failed:", e?.message));
 }
 
 // Reject a token whose embedded version no longer matches the user's current
@@ -522,6 +544,8 @@ app.post("/api/auth/register", validate(RegisterSchema), async (req: any, res) =
 
   const newUser = await createUser({ id, email, passwordHash, displayName, handle, avatar, interests });
   const token   = signToken(id, newUser.tokenVersion);
+  // Soft gate: log in immediately, but email a verification link.
+  dispatchVerification(newUser);
   res.status(201).json({ token, user: sanitiseUser(newUser) });
 });
 
@@ -582,6 +606,33 @@ app.post("/api/auth/change-password", authMiddleware, validate(ChangePasswordSch
   res.json({ token: signToken(user.id, nextVersion), message: "Password updated" });
 });
 
+// Confirm an email-verification link. Idempotent; sends the welcome email once.
+app.post("/api/auth/verify-email", async (req, res) => {
+  const { token } = req.body || {};
+  if (!token) return res.status(400).json({ error: "Verification token required" });
+  const userId = verifyVerifyToken(token);
+  if (!userId) return res.status(400).json({ error: "This verification link is invalid or has expired." });
+
+  const user = await getUserById(userId);
+  if (!user) return res.status(404).json({ error: "Account not found" });
+
+  if (!user.emailVerified) {
+    await updateUser(user.id, { emailVerified: true });
+    sendWelcomeEmail(user.email, user.displayName || "there")
+      .catch(e => console.warn("[email] welcome dispatch failed:", e?.message));
+  }
+  res.json({ ok: true, alreadyVerified: user.emailVerified });
+});
+
+// Resend the verification email to the logged-in user.
+app.post("/api/auth/resend-verification", authMiddleware, async (req: any, res) => {
+  const user = await getUserById(req.userId);
+  if (!user) return res.status(404).json({ error: "Account not found" });
+  if (user.emailVerified) return res.json({ ok: true, alreadyVerified: true });
+  dispatchVerification(user);
+  res.json({ ok: true });
+});
+
 app.post("/api/auth/google", async (req, res) => {
   if (!jwt) return res.status(503).json({ error: "Auth packages not installed." });
   if (!googleClient || !GOOGLE_CLIENT_ID) {
@@ -609,12 +660,15 @@ app.post("/api/auth/google", async (req, res) => {
     let user = await getUserByEmail(email);
     if (!user) {
       const id = "user_google_" + googleId;
+      // Google has already verified this email — mark verified and welcome them.
       user = await createUser({
         id, email, passwordHash: "", displayName: name || email,
         handle: generateHandle(name || email, id),
         avatar: picture || `https://ui-avatars.com/api/?name=${encodeURIComponent(name || "User")}&background=3D5A3E&color=fff&size=100`,
-        interests: [],
+        interests: [], emailVerified: true,
       });
+      sendWelcomeEmail(user.email, user.displayName || "there")
+        .catch(e => console.warn("[email] welcome dispatch failed:", e?.message));
     }
     res.json({ token: signToken(user.id, user.tokenVersion), user: sanitiseUser(user) });
   } catch (err: any) {
@@ -1443,8 +1497,9 @@ async function ensureAdmin() {
 
 // ── Server startup ────────────────────────────────────────────────────────────
 async function startServer() {
-  // Connect to database
+  // Connect to database + apply idempotent migrations
   await testConnection();
+  await runMigrations();
 
   // Ensure the admin account from env (ADMIN_EMAIL / ADMIN_PASSWORD).
   await ensureAdmin();
