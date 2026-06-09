@@ -61,17 +61,21 @@ app.use(helmet({
   contentSecurityPolicy: IS_PROD ? {
     directives: {
       defaultSrc:     ["'self'"],
-      scriptSrc:      ["'self'", "'unsafe-inline'", "accounts.google.com"],
-      styleSrc:       ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      // Google Identity Services: script + iframe + xhr + button styles
+      scriptSrc:      ["'self'", "'unsafe-inline'", "https://accounts.google.com"],
+      styleSrc:       ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://accounts.google.com"],
       fontSrc:        ["'self'", "https://fonts.gstatic.com", "data:"],
       imgSrc:         ["'self'", "data:", "https:"],
-      connectSrc:     ["'self'", "https://generativelanguage.googleapis.com"],
-      frameSrc:       ["'none'"],
+      connectSrc:     ["'self'", "https://generativelanguage.googleapis.com", "https://accounts.google.com"],
+      frameSrc:       ["'self'", "https://accounts.google.com"],
       objectSrc:      ["'none'"],
       upgradeInsecureRequests: [],
     },
   } : false, // relax CSP in dev so Vite HMR works
   crossOriginEmbedderPolicy: false, // needed for @napi-rs/canvas
+  // Google sign-in opens a popup that must postMessage the credential back via
+  // window.opener — the default COOP "same-origin" severs that link (blank popup).
+  crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
   // Allow OG images (/api/og/*) to be fetched cross-origin by social crawlers
   // (Twitter, Facebook, LinkedIn) and let static assets load without CORS friction.
   crossOriginResourcePolicy: { policy: "cross-origin" },
