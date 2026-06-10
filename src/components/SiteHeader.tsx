@@ -1,8 +1,65 @@
 import { useState, useEffect } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Search } from "lucide-react";
 import Logo from "./Logo";
 import UserBadge from "./UserBadge";
 import VerifyEmailBanner from "./VerifyEmailBanner";
+
+const SEARCH_WORDS = ["quotes", "authors", "themes", "topics", "movies", "speeches"];
+
+function HeaderSearch({ scrolled }: { scrolled: boolean }) {
+  const navigate = useNavigate();
+  const [term, setTerm] = useState("");
+  const [wordIndex, setWordIndex] = useState(0);
+  const [animating, setAnimating] = useState(false);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setAnimating(true);
+      setTimeout(() => {
+        setWordIndex((i) => (i + 1) % SEARCH_WORDS.length);
+        setAnimating(false);
+      }, 400);
+    }, 2200);
+    return () => clearInterval(interval);
+  }, []);
+
+  const submit = (e: import("react").FormEvent) => {
+    e.preventDefault();
+    if (term.trim()) navigate(`/explore?search=${encodeURIComponent(term.trim())}`);
+  };
+
+  return (
+    <form
+      onSubmit={submit}
+      className={`relative hidden md:flex items-center bg-white/70 border border-stone-200 rounded-full transition-all duration-300 ${
+        scrolled ? "h-8 w-44" : "h-9 w-56"
+      } focus-within:ring-2 focus-within:ring-[#3D5A3E]/20 focus-within:border-[#3D5A3E]/40`}
+    >
+      <Search className="absolute left-3 w-3.5 h-3.5 text-stone-400 pointer-events-none" />
+      <input
+        type="search"
+        value={term}
+        onChange={(e) => setTerm(e.target.value)}
+        className="w-full h-full bg-transparent rounded-full pl-8 pr-3 text-xs text-stone-800 placeholder-transparent focus:outline-none"
+        aria-label="Search quotes, authors, themes, topics"
+      />
+      {!term && (
+        <div className="pointer-events-none absolute left-8 right-3 flex items-center gap-1 text-xs text-stone-400 overflow-hidden">
+          <span className="flex-shrink-0">Search</span>
+          <span className="relative h-4 flex-1 overflow-hidden">
+            <span
+              key={wordIndex}
+              className={`absolute left-0 top-0 whitespace-nowrap font-bold italic text-[#3D5A3E] ${animating ? "word-cycle-out" : "word-cycle-in"}`}
+            >
+              {SEARCH_WORDS[wordIndex]}…
+            </span>
+          </span>
+        </div>
+      )}
+    </form>
+  );
+}
 
 export default function SiteHeader() {
   const [scrolled, setScrolled] = useState(false);
@@ -60,7 +117,17 @@ export default function SiteHeader() {
             </Link>
           </nav>
 
-          <UserBadge />
+          <div className="flex items-center gap-2">
+            <HeaderSearch scrolled={scrolled} />
+            <Link
+              to="/explore"
+              aria-label="Search"
+              className="md:hidden w-9 h-9 rounded-full flex items-center justify-center text-stone-500 hover:text-stone-800 hover:bg-stone-100 transition-colors"
+            >
+              <Search className="w-4 h-4" />
+            </Link>
+            <UserBadge />
+          </div>
         </div>
       </div>
     </header>

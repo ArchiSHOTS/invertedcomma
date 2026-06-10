@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   BookOpen, Film, Mic2, FileText, Newspaper, MessageCircle,
   Feather, Hash, Search, X, RefreshCw, ChevronRight, Sparkles,
@@ -118,7 +118,16 @@ export default function ExplorePage() {
   const [activeSource, setActiveSource] = useState<SourceType | "all">("all");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [activeTag, setActiveTag] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchTerm, setSearchTerm] = useState(searchParams.get("search") || "");
+
+  // Keep the URL in sync so header search links / back-forward navigation work
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    if (searchTerm.trim()) next.set("search", searchTerm); else next.delete("search");
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchTerm]);
 
   useEffect(() => {
     fetch("/api/quotes")

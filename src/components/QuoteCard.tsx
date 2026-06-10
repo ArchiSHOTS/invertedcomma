@@ -124,7 +124,13 @@ export default function QuoteCard({
 
   // ── Card ───────────────────────────────────────────────────────────────────
   return (
-    <div className="group relative bg-white border border-stone-200 rounded-2xl flex flex-col gap-0 hover:shadow-lg hover:border-stone-300 transition-all duration-200 overflow-hidden w-full">
+    <div
+      onClick={() => navigate(`/q/${quote.slug}`)}
+      role="link"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === "Enter") navigate(`/q/${quote.slug}`); }}
+      className="group relative bg-white border border-stone-200 rounded-2xl flex flex-col gap-0 hover:shadow-lg hover:border-stone-300 transition-all duration-200 overflow-hidden w-full cursor-pointer"
+    >
 
       {/* Category stripe */}
       <div className="flex items-center justify-between px-5 pt-5 pb-3">
@@ -135,7 +141,7 @@ export default function QuoteCard({
           {quote.category}
         </span>
         <button
-          onClick={handleLike}
+          onClick={(e) => { e.stopPropagation(); handleLike(); }}
           className={`flex items-center gap-1 text-xs font-mono rounded-full px-2.5 py-1 transition-all ${
             hasLiked
               ? "bg-rose-50 text-rose-500"
@@ -169,16 +175,20 @@ export default function QuoteCard({
           {visibleTags.map((tag) => (
             <button
               key={tag}
-              onClick={() => onTagClick ? onTagClick(tag) : navigate(`/tag/${tag}`)}
+              onClick={(e) => { e.stopPropagation(); onTagClick ? onTagClick(tag) : navigate(`/tag/${tag}`); }}
               className="px-2.5 py-1 text-[10px] text-stone-500 bg-stone-50 hover:bg-stone-100 rounded-full border border-stone-200 transition-colors"
             >
               #{tag}
             </button>
           ))}
           {quote.tags.length > visibleTags.length && (
-            <span className="px-2 py-1 text-[10px] text-stone-400 font-mono">
+            <button
+              onClick={(e) => { e.stopPropagation(); navigate(`/q/${quote.slug}`); }}
+              className="px-2 py-1 text-[10px] text-stone-400 hover:text-stone-600 font-mono transition-colors"
+              aria-label="View all tags"
+            >
               +{quote.tags.length - visibleTags.length}
-            </span>
+            </button>
           )}
         </div>
       )}
@@ -193,6 +203,7 @@ export default function QuoteCard({
               href={book.affiliateUrl}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
               className="flex items-center gap-1 text-[10px] text-stone-500 hover:text-stone-800 hover:underline transition-colors font-medium truncate"
             >
               <BookOpen className="w-2.5 h-2.5 flex-shrink-0" />
@@ -208,7 +219,7 @@ export default function QuoteCard({
         <div className="flex items-center gap-1">
           {/* Bookmark */}
           <button
-            onClick={onToggleBookmark}
+            onClick={(e) => { e.stopPropagation(); onToggleBookmark(); }}
             className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${
               isBookmarked
                 ? "bg-stone-800 text-white"
@@ -222,7 +233,7 @@ export default function QuoteCard({
           {/* Add to collection */}
           <div className="relative">
             <button
-              onClick={() => setShowFolderMenu(!showFolderMenu)}
+              onClick={(e) => { e.stopPropagation(); setShowFolderMenu(!showFolderMenu); }}
               className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${
                 showFolderMenu
                   ? "bg-stone-800 text-white"
@@ -234,8 +245,11 @@ export default function QuoteCard({
             </button>
             {showFolderMenu && (
               <>
-                <div className="fixed inset-0 z-10" onClick={() => setShowFolderMenu(false)} />
-                <div className="absolute bottom-full left-0 mb-2 w-52 bg-white border border-stone-200 rounded-xl shadow-xl p-2 z-20 space-y-0.5">
+                <div className="fixed inset-0 z-10" onClick={(e) => { e.stopPropagation(); setShowFolderMenu(false); }} />
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute bottom-full left-0 mb-2 w-52 bg-white border border-stone-200 rounded-xl shadow-xl p-2 z-20 space-y-0.5"
+                >
                   <p className="text-[9px] font-bold uppercase tracking-wider text-stone-400 px-2 py-1.5 border-b border-stone-100">
                     Save to folder
                   </p>
@@ -268,7 +282,7 @@ export default function QuoteCard({
 
           {/* Share */}
           <button
-            onClick={onShareCard || handleShare}
+            onClick={(e) => { e.stopPropagation(); (onShareCard || handleShare)(); }}
             className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${
               copiedShare
                 ? "bg-stone-800 text-white"
@@ -284,6 +298,7 @@ export default function QuoteCard({
         <div className="flex items-center gap-2">
           <Link
             to={`/q/${quote.slug}`}
+            onClick={(e) => e.stopPropagation()}
             className="h-8 px-3 rounded-full text-[10px] font-semibold text-white flex items-center gap-1.5 transition-all"
             style={{ background: BRAND }}
           >

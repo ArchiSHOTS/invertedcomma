@@ -41,3 +41,19 @@ body {
   background: #E5E1D9;
   border-radius: 9999px;
 }
+
+/* Rotating word animation for header search placeholder */
+@keyframes word-cycle-out {
+  0% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-100%); }
+}
+@keyframes word-cycle-in {
+  0% { opacity: 0; transform: translateY(100%); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.word-cycle-out {
+  animation: word-cycle-out 0.4s ease forwards;
+}
+.word-cycle-in {
+  animation: word-cycle-in 0.4s ease forwards;
+}
