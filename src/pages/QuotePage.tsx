@@ -84,9 +84,9 @@ export default function QuotePage() {
     if (local) {
       setQuote(local);
       setLocalLikes(local.likes);
-      document.title = `"${local.text.slice(0, 60)}…" — ${local.author} | Inverted Comma`;
+      document.title = `"${local.text.slice(0, 60)}…" — ${local.author} — Deep Dive with Inverted Comma`;
       updateMeta("description", `${local.text} — ${local.author}`);
-      updateMeta("og:title", `"${local.text.slice(0, 80)}" — ${local.author}`);
+      updateMeta("og:title", `"${local.text.slice(0, 80)}" — ${local.author} — Deep Dive with Inverted Comma`);
       updateMeta("og:description", local.context || local.text);
       updateMeta("og:url", window.location.href);
 
@@ -324,12 +324,13 @@ export default function QuotePage() {
   return (
     <>
       <SEO
-        title={`"${shortText}" — ${quote.author}`}
+        title={`"${shortText}" — ${quote.author} — Deep Dive with Inverted Comma`}
         description={`Deep dive into this ${quote.author} quote. Explore context, commentary, discussion and related ideas on Inverted Comma.`}
         image={ogImage}
         path={`/q/${quote.slug}`}
         type="article"
         jsonLd={quoteJsonLd}
+        appendSiteName={false}
       />
       <div className="min-h-screen bg-[#FBF9F6] flex flex-col">
         <SiteHeader />

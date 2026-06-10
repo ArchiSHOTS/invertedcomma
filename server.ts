@@ -1401,7 +1401,7 @@ app.get("/api/quotes/:quoteId/insights", async (req, res) => {
 
 // ── OG Image generation ───────────────────────────────────────────────────────
 const OG_W = 1200; const OG_H = 630;
-const OG_BG_DARK = "#0F1F10"; const OG_BG_CREAM = "#FAF8F4";
+const OG_BG_DARK = "#0F1F10"; const OG_BG_CREAM = "#FBF9F6";
 const OG_GREEN = "#3D5A3E"; const OG_ACCENT = "#7FAF82"; const OG_STONE = "#9A948C";
 const ogCache = new Map<string, Buffer>();
 
@@ -1414,13 +1414,14 @@ function ogWrap(ctx: any, text: string, maxW: number): string[] {
   if (line) lines.push(line); return lines;
 }
 
-function ogFitText(ctx: any, text: string, maxW: number, maxH: number, maxPt = 72, minPt = 28) {
+function ogFitText(ctx: any, text: string, maxW: number, maxH: number, maxPt = 56, minPt = 22, bold = false) {
+  const weight = bold ? "bold " : "";
   for (let pt = maxPt; pt >= minPt; pt -= 2) {
-    ctx.font = `italic bold ${pt}px Georgia, serif`;
+    ctx.font = `italic ${weight}${pt}px Georgia, serif`;
     const lines = ogWrap(ctx, text, maxW);
     if (lines.length * pt * 1.4 <= maxH) return { pt, lines };
   }
-  ctx.font = `italic bold ${minPt}px Georgia, serif`;
+  ctx.font = `italic ${weight}${minPt}px Georgia, serif`;
   return { pt: minPt, lines: ogWrap(ctx, text, maxW) };
 }
 
@@ -1517,7 +1518,7 @@ function registerSocialMetaRoutes(renderShell: (url: string) => Promise<string>)
       const shortText = quote.text.length > 120 ? quote.text.slice(0, 118) + "…" : quote.text;
       const html = await renderShell(req.originalUrl);
       res.send(injectMetaTags(html, {
-        title: `"${shortText}" — ${quote.author} — ${SITE_NAME_META}`,
+        title: `"${shortText}" — ${quote.author} — Deep Dive with ${SITE_NAME_META}`,
         description: quote.context || quote.text,
         image: `${SITE_URL}/api/og/quote/${quote.slug}`,
         url: `${SITE_URL}/q/${quote.slug}`,
@@ -1563,25 +1564,25 @@ function registerSocialMetaRoutes(renderShell: (url: string) => Promise<string>)
 function buildQuoteOg(quote: { text: string; author: string; year?: number; tags?: string[]; category?: string }): Buffer {
   if (!createCanvas) return Buffer.alloc(0);
   const canvas = createCanvas(OG_W, OG_H); const ctx = canvas.getContext("2d");
-  ctx.fillStyle = OG_BG_DARK; ctx.fillRect(0, 0, OG_W, OG_H);
-  ogGhost(ctx, true);
+  ctx.fillStyle = OG_BG_CREAM; ctx.fillRect(0, 0, OG_W, OG_H);
+  ogGhost(ctx, false);
   const tag = (quote.tags?.[0] || quote.category || "quote").toUpperCase();
   ctx.font = "bold 20px Arial, sans-serif";
   const tagW = ctx.measureText(`#${tag}`).width + 32;
-  ctx.fillStyle = "rgba(255,255,255,0.08)"; ctx.beginPath(); ctx.roundRect(60, 52, tagW, 36, 18); ctx.fill();
-  ctx.fillStyle = OG_ACCENT; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(`#${tag}`, 76, 70);
-  ctx.font = "bold 13px Arial, sans-serif"; ctx.fillStyle = "rgba(255,255,255,0.3)";
+  ctx.fillStyle = OG_GREEN; ctx.beginPath(); ctx.roundRect(60, 52, tagW, 36, 18); ctx.fill();
+  ctx.fillStyle = "#FFFFFF"; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(`#${tag}`, 76, 70);
+  ctx.font = "bold 13px Arial, sans-serif"; ctx.fillStyle = OG_STONE;
   ctx.textAlign = "right"; ctx.fillText("DEEP DIVE", OG_W - 60, 70);
   const PAD = 60; const INNER = OG_W - PAD * 2;
   const rawText = quote.text.length > 200 ? quote.text.slice(0, 198) + "…" : quote.text;
   const { pt, lines } = ogFitText(ctx, `"${rawText}"`, INNER, 320);
-  ctx.fillStyle = "#FFFFFF"; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = OG_GREEN; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
   let ty = 148 + pt;
   for (const line of lines) { ctx.fillText(line, PAD, ty); ty += pt * 1.4; }
   const authorText = `— ${quote.author.toUpperCase()}` + (quote.year ? `  ·  ${quote.year < 0 ? `${Math.abs(quote.year)} BC` : quote.year}` : "");
-  ctx.font = `bold 24px Arial, sans-serif`; ctx.fillStyle = OG_ACCENT; ctx.textAlign = "left";
+  ctx.font = `italic bold 24px Georgia, serif`; ctx.fillStyle = OG_GREEN; ctx.textAlign = "left";
   ctx.fillText(authorText, PAD, ty + 24);
-  ogDivider(ctx, true, OG_H - 80); ogFooter(ctx, true);
+  ogDivider(ctx, false, OG_H - 80); ogFooter(ctx, false);
   return canvas.toBuffer("image/png");
 }
 

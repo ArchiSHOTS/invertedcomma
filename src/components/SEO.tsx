@@ -21,6 +21,8 @@ interface SEOProps {
   noIndex?: boolean;
   /** JSON-LD structured data object */
   jsonLd?: object;
+  /** Set false if `title` already includes the site name (default true) */
+  appendSiteName?: boolean;
 }
 
 export default function SEO({
@@ -31,8 +33,11 @@ export default function SEO({
   type = "website",
   noIndex,
   jsonLd,
+  appendSiteName = true,
 }: SEOProps) {
-  const fullTitle = title ? `${title} — ${SITE_NAME}` : SITE_NAME;
+  const fullTitle = title
+    ? (appendSiteName ? `${title} — ${SITE_NAME}` : title)
+    : SITE_NAME;
   const desc      = description || DEFAULT_DESC;
   const img       = image       || DEFAULT_OG;
   const canonical = path ? `${SITE_URL}${path}` : SITE_URL;
