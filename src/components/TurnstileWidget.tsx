@@ -33,12 +33,16 @@ function loadTurnstileScript(): Promise<void> {
  */
 export function useTurnstile() {
   const [token, setToken] = useState("");
+  const [loadTimeout, setLoadTimeout] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!SITE_KEY) return;
     let cancelled = false;
+    const timeoutId = setTimeout(() => {
+      if (!cancelled) setLoadTimeout(true);
+    }, 5000);
     loadTurnstileScript().then(() => {
       if (cancelled || !containerRef.current || !window.turnstile) return;
       widgetIdRef.current = window.turnstile.render(containerRef.current, {
@@ -48,9 +52,11 @@ export function useTurnstile() {
         "expired-callback": () => setToken(""),
         "error-callback": () => setToken(""),
       });
+      clearTimeout(timeoutId);
     });
     return () => {
       cancelled = true;
+      clearTimeout(timeoutId);
       if (window.turnstile && widgetIdRef.current) {
         window.turnstile.remove(widgetIdRef.current);
       }
@@ -69,5 +75,5 @@ export function useTurnstile() {
     };
   }, []);
 
-  return { token, reset, Widget, enabled: !!SITE_KEY };
+  return { token, reset, Widget, enabled: !!SITE_KEY && !loadTimeout };
 }
