@@ -1058,20 +1058,11 @@ app.get("/api/admin/import-wikiquote/status", adminMiddleware, (_req, res) => {
   res.json(importStatus);
 });
 
-app.post("/api/admin/quotes/:id/approve", adminMiddleware, async (req, res) => {
-  const q = await updateRuntimeQuote(req.params.id, { status: "published" });
-  if (!q) return res.status(404).json({ error: "Quote not found" });
-  res.json({ ok: true, quote: q });
-});
-
-app.post("/api/admin/quotes/:id/reject", adminMiddleware, async (req, res) => {
-  const q = await updateRuntimeQuote(req.params.id, { status: "rejected" });
-  if (!q) return res.status(404).json({ error: "Quote not found" });
-  res.json({ ok: true, quote: q });
-});
-
 // Bulk approve/reject quotes — by explicit IDs, or by a status/sourceType filter
 // (e.g. "approve all pending"). Single SQL UPDATE, so 2,000+ rows is instant.
+// IMPORTANT: these /bulk/ routes MUST be registered BEFORE the /:id/ routes
+// below — otherwise Express matches "bulk" as the :id param and the bulk
+// handler is never reached (returns a spurious 404 "Quote not found").
 const BulkSchema = z.object({
   ids: z.array(z.string()).optional(),
   status: z.enum(["pending", "published", "rejected"]).optional(),
@@ -1093,6 +1084,18 @@ async function bulkSetStatus(req: any, res: any, newStatus: string) {
 
 app.post("/api/admin/quotes/bulk/approve", adminMiddleware, (req, res) => bulkSetStatus(req, res, "published"));
 app.post("/api/admin/quotes/bulk/reject",  adminMiddleware, (req, res) => bulkSetStatus(req, res, "rejected"));
+
+app.post("/api/admin/quotes/:id/approve", adminMiddleware, async (req, res) => {
+  const q = await updateRuntimeQuote(req.params.id, { status: "published" });
+  if (!q) return res.status(404).json({ error: "Quote not found" });
+  res.json({ ok: true, quote: q });
+});
+
+app.post("/api/admin/quotes/:id/reject", adminMiddleware, async (req, res) => {
+  const q = await updateRuntimeQuote(req.params.id, { status: "rejected" });
+  if (!q) return res.status(404).json({ error: "Quote not found" });
+  res.json({ ok: true, quote: q });
+});
 
 app.get("/api/admin/quotes", adminMiddleware, async (req, res) => {
   const quotes = await getRuntimeQuotes();
