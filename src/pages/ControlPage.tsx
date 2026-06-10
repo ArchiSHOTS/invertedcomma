@@ -829,15 +829,25 @@ function QuotesTab() {
     if (res.ok) setQuotes(prev => prev.filter(q => q.id !== id));
   };
 
+  // When the whole filtered set is selected with a single status filter and no
+  // search, ask the server to update by filter — sending thousands of IDs would
+  // exceed the 64kb JSON body limit (silent 413) and the write would never land.
+  const bulkBody = (): string => {
+    const allMatchingFilter =
+      selected.size === displayed.length && statusFilter !== "all" && !search.trim();
+    return JSON.stringify(allMatchingFilter ? { status: statusFilter } : { ids: [...selected] });
+  };
+
   const bulkApprove = async () => {
     if (selected.size === 0) return;
     setBulkApproving(true);
     try {
-      await fetch("/api/admin/quotes/bulk/approve", {
-        method: "POST", headers: authHeaders(), body: JSON.stringify({ ids: [...selected] }),
+      const res = await fetch("/api/admin/quotes/bulk/approve", {
+        method: "POST", headers: authHeaders(), body: bulkBody(),
       });
-      setQuotes(prev => prev.map(q => selected.has(q.id) ? { ...q, status: "published" } : q));
+      if (!res.ok) { alert("Approve failed — please try again."); return; }
       setSelected(new Set());
+      load(); // reload true state from the server
     } finally { setBulkApproving(false); }
   };
 
@@ -845,11 +855,12 @@ function QuotesTab() {
     if (selected.size === 0) return;
     setBulkRejecting(true);
     try {
-      await fetch("/api/admin/quotes/bulk/reject", {
-        method: "POST", headers: authHeaders(), body: JSON.stringify({ ids: [...selected] }),
+      const res = await fetch("/api/admin/quotes/bulk/reject", {
+        method: "POST", headers: authHeaders(), body: bulkBody(),
       });
-      setQuotes(prev => prev.map(q => selected.has(q.id) ? { ...q, status: "rejected" } : q));
+      if (!res.ok) { alert("Reject failed — please try again."); return; }
       setSelected(new Set());
+      load(); // reload true state from the server
     } finally { setBulkRejecting(false); }
   };
 

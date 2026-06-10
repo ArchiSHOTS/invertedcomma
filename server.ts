@@ -157,7 +157,7 @@ app.use("/api/admin/extract-youtube", aiLimiter);
 app.use("/api/admin/extract-text",    aiLimiter);
 
 // ── Body size limit ───────────────────────────────────────────────────────────
-app.use(express.json({ limit: "64kb" }));
+app.use(express.json({ limit: "512kb" }));
 
 // ── Input validation helpers (Zod) ───────────────────────────────────────────
 /** Middleware factory: validates req.body against a Zod schema */
