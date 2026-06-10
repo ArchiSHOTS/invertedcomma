@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { LogIn, LogOut, ShieldCheck, ChevronDown, User, Settings } from "lucide-react";
+import { ArrowRight, LogOut, ShieldCheck, ChevronDown, User, Settings } from "lucide-react";
 import { useUser } from "../context/UserContext";
 
 export default function UserBadge() {
@@ -11,10 +11,11 @@ export default function UserBadge() {
     return (
       <Link
         to="/auth/login"
-        className="flex items-center gap-1.5 h-9 px-3 border border-[#E5E1D9] rounded-full text-xs font-medium text-[#6B665E] hover:bg-[#F5F2ED] transition-colors"
+        className="group flex items-center gap-1.5 h-9 px-4 rounded-full text-xs font-semibold text-white transition-colors"
+        style={{ background: "#3D5A3E" }}
       >
-        <LogIn className="w-3.5 h-3.5" />
         <span className="hidden sm:inline">Start Here, Commarade!</span>
+        <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-1" />
       </Link>
     );
   }
