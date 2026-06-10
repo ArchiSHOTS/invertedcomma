@@ -1,4 +1,5 @@
 import express from "express";
+import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
 import helmet from "helmet";
@@ -1447,6 +1448,118 @@ function ogDivider(ctx: any, dark: boolean, y: number) {
   ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(60, y); ctx.lineTo(OG_W - 60, y); ctx.stroke();
 }
 
+// ── Server-side social-preview meta injection ────────────────────────────────
+// Crawlers (Facebook, Twitter/X, LinkedIn, Slack, WhatsApp, etc.) don't run JS,
+// so the react-helmet-async tags set client-side in <SEO> are invisible to
+// them — they only ever see the static index.html shell. These routes inject
+// the same og:/twitter: tags server-side before sending the HTML.
+const SITE_NAME_META  = "Inverted Comma";
+const TWITTER_ID_META = "@invertedcomma";
+const DEFAULT_DESC_META = "Curating high-contrast quotes, counterpoints & conversations — from books, films, speeches and beyond.";
+
+function escapeHtml(str: string): string {
+  return String(str).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!
+  ));
+}
+
+interface MetaTags {
+  title: string;
+  description?: string;
+  image?: string;
+  url: string;
+  type?: "website" | "article";
+}
+
+function renderMetaTagsHtml({ title, description, image, url, type = "website" }: MetaTags): string {
+  const desc = description || DEFAULT_DESC_META;
+  const img  = image || `${SITE_URL}/api/og/default`;
+  return [
+    `<title>${escapeHtml(title)}</title>`,
+    `<meta name="description" content="${escapeHtml(desc)}" />`,
+    `<link rel="canonical" href="${escapeHtml(url)}" />`,
+    `<meta property="og:site_name" content="${SITE_NAME_META}" />`,
+    `<meta property="og:type" content="${type}" />`,
+    `<meta property="og:url" content="${escapeHtml(url)}" />`,
+    `<meta property="og:title" content="${escapeHtml(title)}" />`,
+    `<meta property="og:description" content="${escapeHtml(desc)}" />`,
+    `<meta property="og:image" content="${escapeHtml(img)}" />`,
+    `<meta property="og:image:width" content="1200" />`,
+    `<meta property="og:image:height" content="630" />`,
+    `<meta property="og:image:type" content="image/png" />`,
+    `<meta name="twitter:card" content="summary_large_image" />`,
+    `<meta name="twitter:site" content="${TWITTER_ID_META}" />`,
+    `<meta name="twitter:creator" content="${TWITTER_ID_META}" />`,
+    `<meta name="twitter:title" content="${escapeHtml(title)}" />`,
+    `<meta name="twitter:description" content="${escapeHtml(desc)}" />`,
+    `<meta name="twitter:image" content="${escapeHtml(img)}" />`,
+  ].join("\n    ");
+}
+
+// Strips the <title> the static shell ships with and inserts our tags right
+// before </head> so they win over (and don't duplicate) the static defaults.
+function injectMetaTags(html: string, meta: MetaTags): string {
+  const withoutTitle = html.replace(/<title>[^<]*<\/title>/, "");
+  return withoutTitle.replace("</head>", `${renderMetaTagsHtml(meta)}\n  </head>`);
+}
+
+// Registers routes that serve the SPA shell with route-specific OG/Twitter
+// meta tags baked in server-side, for /q/:slug, /author/:slug and /tag/:tag.
+// Must be registered before the SPA's catch-all (express.static fallback /
+// vite's "spa" middleware) so they take priority for these paths.
+function registerSocialMetaRoutes(renderShell: (url: string) => Promise<string>) {
+  app.get("/q/:slug", async (req, res, next) => {
+    try {
+      const all   = getEnrichedQuotes() as any[];
+      const rq    = await getRuntimeQuotes("published");
+      const quote = [...all, ...rq].find((q: any) => q.slug === req.params.slug);
+      if (!quote) return next();
+      const shortText = quote.text.length > 120 ? quote.text.slice(0, 118) + "…" : quote.text;
+      const html = await renderShell(req.originalUrl);
+      res.send(injectMetaTags(html, {
+        title: `"${shortText}" — ${quote.author} — ${SITE_NAME_META}`,
+        description: quote.context || quote.text,
+        image: `${SITE_URL}/api/og/quote/${quote.slug}`,
+        url: `${SITE_URL}/q/${quote.slug}`,
+        type: "article",
+      }));
+    } catch (err) { next(err); }
+  });
+
+  app.get("/author/:slug", async (req, res, next) => {
+    try {
+      const slug   = req.params.slug;
+      const author = await getAuthorBySlug(slug);
+      const all    = getEnrichedQuotes() as any[];
+      const rq     = await getRuntimeQuotes("published");
+      const quoteCount = [...all, ...rq].filter((q: any) =>
+        (q.author || "").toLowerCase().replace(/[^a-z0-9]+/g, "-") === slug
+      ).length;
+      const name = author?.name || slug.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+      const html = await renderShell(req.originalUrl);
+      res.send(injectMetaTags(html, {
+        title: `${name} — Quotes — ${SITE_NAME_META}`,
+        description: author?.bio || `Explore ${quoteCount} quote${quoteCount === 1 ? "" : "s"} from ${name} on Inverted Comma.`,
+        image: `${SITE_URL}/api/og/author/${slug}`,
+        url: `${SITE_URL}/author/${slug}`,
+      }));
+    } catch (err) { next(err); }
+  });
+
+  app.get("/tag/:tag", async (req, res, next) => {
+    try {
+      const tag = decodeURIComponent(req.params.tag);
+      const html = await renderShell(req.originalUrl);
+      res.send(injectMetaTags(html, {
+        title: `#${tag} — ${SITE_NAME_META}`,
+        description: `Browse, read and deep dive into quotes about ${tag} on Inverted Comma.`,
+        image: `${SITE_URL}/api/og/tag/${encodeURIComponent(tag)}`,
+        url: `${SITE_URL}/tag/${encodeURIComponent(tag)}`,
+      }));
+    } catch (err) { next(err); }
+  });
+}
+
 function buildQuoteOg(quote: { text: string; author: string; year?: number; tags?: string[]; category?: string }): Buffer {
   if (!createCanvas) return Buffer.alloc(0);
   const canvas = createCanvas(OG_W, OG_H); const ctx = canvas.getContext("2d");
@@ -1665,13 +1778,32 @@ async function startServer() {
   // Ensure the admin account from env (ADMIN_EMAIL / ADMIN_PASSWORD).
   await ensureAdmin();
 
+  let renderShell: (url: string) => Promise<string>;
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
+    renderShell = async (url) => {
+      const raw = fs.readFileSync(path.join(process.cwd(), "index.html"), "utf-8");
+      return vite.transformIndexHtml(url, raw);
+    };
+    // Routes below are registered first so they win over vite's SPA fallback.
+    registerSocialMetaRoutes(renderShell);
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => res.sendFile(path.join(distPath, "index.html")));
+    const shellHtml = fs.readFileSync(path.join(distPath, "index.html"), "utf-8");
+    renderShell = async () => shellHtml;
+    registerSocialMetaRoutes(renderShell);
+    // index: false — let the catch-all below inject meta tags into "/" too,
+    // instead of express.static serving dist/index.html as-is.
+    app.use(express.static(distPath, { index: false }));
+    app.get("*", async (req, res) => {
+      const html = await renderShell(req.originalUrl);
+      res.send(injectMetaTags(html, {
+        title: `${SITE_NAME_META} — Curated Quotes & Dialectics`,
+        url: `${SITE_URL}${req.path}`,
+      }));
+    });
   }
 
   // ── Global error handler — must be last ──────────────────────────────────
