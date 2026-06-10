@@ -91,7 +91,7 @@ export default function SiteFooter() {
                 <span className="w-6 h-6 rounded-full bg-emerald-400/20 flex items-center justify-center">
                   <Check className="w-3.5 h-3.5" />
                 </span>
-                You're in! Check your inbox.
+                You're in, {name.trim() || "Commarade"}! Check your inbox.
               </div>
             ) : (
               <form onSubmit={handleSubscribe} className="max-w-md">
