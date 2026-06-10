@@ -14,7 +14,7 @@ export default function UserBadge() {
         className="flex items-center gap-1.5 h-9 px-3 border border-[#E5E1D9] rounded-full text-xs font-medium text-[#6B665E] hover:bg-[#F5F2ED] transition-colors"
       >
         <LogIn className="w-3.5 h-3.5" />
-        <span className="hidden sm:inline">Sign in</span>
+        <span className="hidden sm:inline">Start Here, Commarade!</span>
       </Link>
     );
   }
