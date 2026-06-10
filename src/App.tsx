@@ -26,6 +26,7 @@ import LoginPage from "./pages/auth/LoginPage";
 import SignupPage from "./pages/auth/SignupPage";
 import ForgotPasswordPage from "./pages/auth/ForgotPasswordPage";
 import VerifyEmailPage from "./pages/auth/VerifyEmailPage";
+import UnsubscribePage from "./pages/UnsubscribePage";
 import AboutPage from "./pages/AboutPage";
 import TermsPage from "./pages/TermsPage";
 import PrivacyPage from "./pages/PrivacyPage";
@@ -400,6 +401,7 @@ export default function App() {
           <Route path="/auth/signup" element={<SignupPage />} />
           <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/auth/verify" element={<VerifyEmailPage />} />
+          <Route path="/unsubscribe" element={<UnsubscribePage />} />
           <Route path="/me" element={<MePage />} />
           <Route path="/u/:handle" element={<UserProfilePage />} />
           <Route path="/author/:slug" element={<AuthorPage />} />

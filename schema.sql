@@ -78,7 +78,9 @@ CREATE INDEX IF NOT EXISTS comments_quote_id_idx ON comments(quote_id);
 CREATE TABLE IF NOT EXISTS subscribers (
   id               SERIAL PRIMARY KEY,
   email            TEXT NOT NULL UNIQUE,
+  name             TEXT,
   source           TEXT NOT NULL DEFAULT 'footer',
+  status           TEXT NOT NULL DEFAULT 'subscribed',
   subscribed_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   unsubscribed_at  TIMESTAMPTZ
 );

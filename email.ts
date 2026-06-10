@@ -160,6 +160,26 @@ export async function sendWelcomeEmail(to: string, name: string, quote?: Welcome
   return sendEmail({ to, subject: "Welcome to Inverted Comma", html: welcomeEmailHtml(name, quote) });
 }
 
+export function subscriberWelcomeEmailHtml(name: string, unsubscribeUrl: string): string {
+  const greeting = name ? escapeHtml(name) : "Commarade";
+  return layout(`
+    <h1 style="margin:0 0 12px;font-size:22px;font-weight:700;">You're on the list, ${greeting} 👋</h1>
+    <p style="margin:0 0 22px;font-size:15px;line-height:1.6;color:#44403c;">
+      Thanks for subscribing to the Inverted Comma newsletter — one thoughtful quote,
+      with context and a deep dive, every week.
+    </p>
+    <p style="margin:0 0 24px;">${button(SITE_URL + "/explore", "Start exploring")}</p>
+    <p style="margin:0;font-size:13px;line-height:1.6;color:#a8a29e;">
+      Didn't sign up for this, or it was someone else? No hard feelings —
+      <a href="${unsubscribeUrl}" style="color:${GREEN};">unsubscribe here</a> any time.
+    </p>
+  `);
+}
+
+export async function sendSubscriberWelcomeEmail(to: string, name: string, unsubscribeUrl: string): Promise<boolean> {
+  return sendEmail({ to, subject: "You're subscribed — Inverted Comma", html: subscriberWelcomeEmailHtml(name, unsubscribeUrl) });
+}
+
 function escapeHtml(s: string): string {
   return (s || "").replace(/[&<>"']/g, (c) => (
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string

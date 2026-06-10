@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, UserPlus, Check, AlertCircle, ArrowRight, ArrowLeft } from "lucide-react";
 import { useUser } from "../../context/UserContext";
 import Logo from "../../components/Logo";
+import { useTurnstile } from "../../components/TurnstileWidget";
 
 const BRAND = "#3D5A3E";
 
@@ -65,6 +66,7 @@ export default function SignupPage() {
 
   const [error, setError]     = useState("");
   const [loading, setLoading] = useState(false);
+  const turnstile = useTurnstile();
 
   useEffect(() => { if (isLoggedIn) navigate("/", { replace: true }); }, [isLoggedIn]);
 
@@ -91,10 +93,11 @@ export default function SignupPage() {
     setError("");
     setLoading(true);
     try {
-      await register({ displayName: displayName.trim(), email: email.toLowerCase(), password, interests: skip ? [] : interests });
+      await register({ displayName: displayName.trim(), email: email.toLowerCase(), password, interests: skip ? [] : interests, turnstileToken: turnstile.token });
       navigate("/", { replace: true });
     } catch (err: any) {
       setError(err.message || "Sign up failed");
+      turnstile.reset();
       setStep(1);
     } finally {
       setLoading(false);
@@ -240,16 +243,18 @@ export default function SignupPage() {
               </p>
             )}
 
-            <button onClick={() => handleSubmit(false)} disabled={loading}
-              className="w-full h-11 rounded-full text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all hover:opacity-90 disabled:opacity-50"
+            <turnstile.Widget />
+
+            <button onClick={() => handleSubmit(false)} disabled={loading || (turnstile.enabled && !turnstile.token)}
+              className="w-full h-11 rounded-full text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all hover:opacity-90 disabled:opacity-50 mt-3"
               style={{ background: BRAND }}
             >
               <UserPlus className="w-4 h-4" />
               {loading ? "Creating account…" : "Create my account"}
             </button>
 
-            <button onClick={() => handleSubmit(true)} disabled={loading}
-              className="w-full h-10 mt-2 rounded-full text-sm text-stone-400 hover:text-stone-600 transition-colors">
+            <button onClick={() => handleSubmit(true)} disabled={loading || (turnstile.enabled && !turnstile.token)}
+              className="w-full h-10 mt-2 rounded-full text-sm text-stone-400 hover:text-stone-600 transition-colors disabled:opacity-50">
               Skip for now
             </button>
           </>

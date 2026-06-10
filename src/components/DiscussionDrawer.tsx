@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { MessageSquare, Shield, User, Bot, Send, Sparkles, X } from "lucide-react";
 import { Quote, Comment } from "../types";
+import { useTurnstile } from "./TurnstileWidget";
 
 interface DiscussionDrawerProps {
   quote: Quote;
@@ -18,6 +19,7 @@ export default function DiscussionDrawer({ quote, isOpen, onClose }: DiscussionD
   const [isAdminToggle, setIsAdminToggle] = useState(false);
   const [isLoadingComments, setIsLoadingComments] = useState(false);
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+  const turnstile = useTurnstile();
 
   useEffect(() => {
     if (isOpen && quote.id) {
@@ -66,6 +68,7 @@ export default function DiscussionDrawer({ quote, isOpen, onClose }: DiscussionD
           username: finalUsername, avatar, text: newCommentText.trim(),
           isCounterpoint: isCounterpointToggle || isAdminToggle,
           isAdmin: isAdminToggle,
+          turnstileToken: turnstile.token,
         }),
       });
       if (res.ok) {
@@ -74,6 +77,9 @@ export default function DiscussionDrawer({ quote, isOpen, onClose }: DiscussionD
         setNewCommentText("");
         setIsAdminToggle(false);
         setIsCounterpointToggle(false);
+        turnstile.reset();
+      } else {
+        turnstile.reset();
       }
     } catch (err) {
       console.error("Error posting comment:", err);
@@ -313,12 +319,14 @@ export default function DiscussionDrawer({ quote, isOpen, onClose }: DiscussionD
             />
             <button
               type="submit"
-              className="absolute right-2 bottom-2.5 text-white bg-[#1A1A1A] hover:bg-neutral-700 p-1.5 rounded-full transition-colors"
+              disabled={turnstile.enabled && !turnstile.token}
+              className="absolute right-2 bottom-2.5 text-white bg-[#1A1A1A] hover:bg-neutral-700 p-1.5 rounded-full transition-colors disabled:opacity-50"
               aria-label="Post comment"
             >
               <Send className="w-3 h-3" />
             </button>
           </div>
+          <turnstile.Widget />
         </form>
       </div>
     </>

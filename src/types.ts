@@ -104,13 +104,17 @@ export interface RegisterPayload {
   email: string;
   password: string;
   interests: string[];
+  turnstileToken?: string;
 }
 
 export interface Subscriber {
   id: string;
   email: string;
+  name: string;
   subscribedAt: string;
-  source: "homepage" | "quote_page" | "admin";
+  unsubscribedAt: string | null;
+  status: "subscribed" | "unsubscribed" | "spam";
+  source: "homepage" | "quote_page" | "admin" | "footer";
 }
 
 // ── Author ────────────────────────────────────────────────────────────────────

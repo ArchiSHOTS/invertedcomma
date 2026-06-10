@@ -47,11 +47,11 @@ import {
   getRuntimeQuotes, getRuntimeQuoteBySlug, createRuntimeQuote,
   updateRuntimeQuote, deleteRuntimeQuote, bulkSetRuntimeQuoteStatus,
   getComments, createComment, likeComment, deleteComment, getAllComments,
-  addSubscriber, getAllSubscribers,
+  addSubscriber, getAllSubscribers, setSubscriberStatus,
   getInsight, setInsight,
   toggleQuoteLike,
 } from "./db.ts";
-import { sendVerificationEmail, sendWelcomeEmail, type WelcomeQuote } from "./email.ts";
+import { sendVerificationEmail, sendWelcomeEmail, sendSubscriberWelcomeEmail, type WelcomeQuote } from "./email.ts";
 import { importWikiquote, importStatus } from "./wikiquote.ts";
 
 const app = express();
@@ -178,6 +178,7 @@ const RegisterSchema = z.object({
   email:       z.string().email().max(254).toLowerCase(),
   password:    z.string().min(8).max(128),
   interests:   z.array(z.string().max(40)).max(20).optional().default([]),
+  turnstileToken: z.string().optional(),
 });
 
 const LoginSchema = z.object({
@@ -208,7 +209,9 @@ const ProfileSchema = z.object({
 
 const SubscribeSchema = z.object({
   email:  z.string().email().toLowerCase(),
+  name:   z.string().max(120).trim().optional(),
   source: z.string().max(40).optional().default("footer"),
+  turnstileToken: z.string().optional(),
 });
 
 const CommentSchema = z.object({
@@ -217,6 +220,7 @@ const CommentSchema = z.object({
   avatar:        z.string().url().optional(),
   isCounterpoint:z.boolean().optional().default(false),
   isAdmin:       z.boolean().optional().default(false),
+  turnstileToken: z.string().optional(),
 });
 
 const QuoteCreateSchema = z.object({
@@ -278,6 +282,29 @@ async function generateWithFallback(
 const JWT_SECRET = process.env.JWT_SECRET || "ic-dev-secret-change-in-production";
 const SALT_ROUNDS = 10;
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
+
+// ── Cloudflare Turnstile (bot/spam protection) ────────────────────────────────
+// Degrades gracefully: if TURNSTILE_SECRET_KEY is unset, verification is skipped
+// (so forms keep working before the Cloudflare keys are configured).
+const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || "";
+async function verifyTurnstile(token: string | undefined, ip?: string): Promise<boolean> {
+  if (!TURNSTILE_SECRET_KEY) return true;
+  if (!token) return false;
+  try {
+    const body = new URLSearchParams({ secret: TURNSTILE_SECRET_KEY, response: token });
+    if (ip) body.set("remoteip", ip);
+    const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    const data: any = await res.json();
+    return !!data.success;
+  } catch (e: any) {
+    console.warn("[turnstile] verification request failed:", e?.message);
+    return false;
+  }
+}
 
 // Admin bootstrap (env-driven — never hardcode the real password in the repo)
 const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "").toLowerCase();
@@ -446,6 +473,17 @@ function verifyVerifyToken(token: string): string | null {
     return p.purpose === "verify" ? p.sub : null;
   } catch { return null; }
 }
+
+// Long-lived, single-purpose token for newsletter unsubscribe links.
+function signUnsubscribeToken(email: string): string {
+  return jwt.sign({ sub: email.toLowerCase(), purpose: "unsubscribe" }, JWT_SECRET, { expiresIn: "1y" });
+}
+function verifyUnsubscribeToken(token: string): string | null {
+  try {
+    const p = jwt.verify(token, JWT_SECRET) as { sub: string; purpose?: string };
+    return p.purpose === "unsubscribe" ? p.sub : null;
+  } catch { return null; }
+}
 /** Fire-and-forget: email a verification link to the user. */
 function dispatchVerification(user: { id: string; email: string; displayName?: string; name?: string }) {
   const url = `${SITE_URL}/auth/verify?token=${signVerifyToken(user.id)}`;
@@ -576,7 +614,11 @@ function slugify(text: string, author: string): string {
 
 app.post("/api/auth/register", validate(RegisterSchema), async (req: any, res) => {
   if (!bcrypt || !jwt) return res.status(503).json({ error: "Auth packages not installed." });
-  const { displayName, email, password, interests } = req.validated as z.infer<typeof RegisterSchema>;
+  const { displayName, email, password, interests, turnstileToken } = req.validated as z.infer<typeof RegisterSchema>;
+
+  if (!(await verifyTurnstile(turnstileToken, req.ip))) {
+    return res.status(400).json({ error: "Verification failed. Please try again." });
+  }
 
   const existing = await getUserByEmail(email);
   if (existing) return res.status(409).json({ error: "An account with this email already exists" });
@@ -884,14 +926,43 @@ app.get("/api/quotes/:slugOrId", async (req, res) => {
 // ── Newsletter ────────────────────────────────────────────────────────────────
 
 app.post("/api/subscribe", validate(SubscribeSchema), async (req: any, res) => {
-  const { email, source } = req.validated as z.infer<typeof SubscribeSchema>;
-  await addSubscriber(email, source);
+  const { email, name, source, turnstileToken } = req.validated as z.infer<typeof SubscribeSchema>;
+
+  if (!(await verifyTurnstile(turnstileToken, req.ip))) {
+    return res.status(400).json({ error: "Verification failed. Please try again." });
+  }
+
+  const sub = await addSubscriber(email, name, source);
+  if (!sub) return res.status(500).json({ error: "Could not subscribe — please try again." });
+
+  const unsubscribeUrl = `${SITE_URL}/unsubscribe?token=${signUnsubscribeToken(email)}`;
+  sendSubscriberWelcomeEmail(email, name || "", unsubscribeUrl)
+    .catch(e => console.warn("[email] subscriber welcome dispatch failed:", e?.message));
+
   res.json({ ok: true, message: "Subscribed!" });
+});
+
+app.get("/api/unsubscribe", async (req, res) => {
+  const token = String(req.query.token || "");
+  const email = verifyUnsubscribeToken(token);
+  if (!email) return res.status(400).json({ error: "Invalid or expired link." });
+  await setSubscriberStatus(email, "unsubscribed");
+  res.json({ ok: true, email });
 });
 
 app.get("/api/admin/subscribers", adminMiddleware, async (req, res) => {
   const subs = await getAllSubscribers();
   res.json({ subscribers: subs, total: subs.length });
+});
+
+app.patch("/api/admin/subscribers/:id/status", adminMiddleware, async (req, res) => {
+  const { status } = req.body as { status?: string };
+  if (!["subscribed", "unsubscribed", "spam"].includes(status || "")) {
+    return res.status(400).json({ error: "Invalid status" });
+  }
+  const sub = await setSubscriberStatus(req.params.id, status as any);
+  if (!sub) return res.status(404).json({ error: "Subscriber not found" });
+  res.json({ subscriber: sub });
 });
 
 // ── Admin: Tags ───────────────────────────────────────────────────────────────
@@ -1127,7 +1198,11 @@ app.get("/api/discussions/:quoteId", async (req, res) => {
 
 app.post("/api/discussions/:quoteId", validate(CommentSchema), async (req: any, res) => {
   const { quoteId }                              = req.params;
-  const { username, avatar, text, isCounterpoint, isAdmin } = req.validated as z.infer<typeof CommentSchema>;
+  const { username, avatar, text, isCounterpoint, isAdmin, turnstileToken } = req.validated as z.infer<typeof CommentSchema>;
+
+  if (!(await verifyTurnstile(turnstileToken, req.ip))) {
+    return res.status(400).json({ error: "Verification failed. Please try again." });
+  }
 
   const comment = await createComment({
     id:          `c_${Date.now()}`,

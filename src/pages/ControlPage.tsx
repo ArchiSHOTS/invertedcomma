@@ -1669,31 +1669,63 @@ function DiscussionsTab() {
 }
 
 // ── Subscribers tab ───────────────────────────────────────────────────────────
+const SUB_STATUS_STYLES: Record<string, string> = {
+  subscribed: "bg-emerald-50 text-emerald-700",
+  unsubscribed: "bg-stone-100 text-stone-500",
+  spam: "bg-rose-50 text-rose-600",
+};
+
 function SubscribersTab() {
   const [subs, setSubs] = useState<Subscriber[]>([]);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "subscribed" | "unsubscribed" | "spam">("all");
 
-  useEffect(() => {
+  const load = useCallback(() => {
     fetch("/api/admin/subscribers", { headers: authHeaders() })
       .then(r => r.json()).then(d => setSubs(d.subscribers || []));
   }, []);
 
+  useEffect(() => { load(); }, [load]);
+
   const handleExport = () => {
-    const csv = ["email,source,date", ...subs.map(s => `${s.email},${s.source},${s.subscribedAt}`)].join("\n");
+    const esc = (v: string) => `"${(v || "").replace(/"/g, '""')}"`;
+    const csv = ["name,email,source,date,status", ...subs.map(s =>
+      [esc(s.name), esc(s.email), esc(s.source), s.subscribedAt, s.status].join(",")
+    )].join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = "ic_subscribers.csv"; a.click();
   };
 
-  const filtered = subs.filter(s => !search || s.email.toLowerCase().includes(search.toLowerCase()));
-  const paged = usePaged([search]);
+  const handleStatus = async (id: string, status: "subscribed" | "unsubscribed" | "spam") => {
+    setSubs(prev => prev.map(s => s.id === id ? { ...s, status } : s));
+    await fetch(`/api/admin/subscribers/${id}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ status }),
+    }).catch(() => {});
+    load();
+  };
+
+  const filtered = subs.filter(s =>
+    (statusFilter === "all" || s.status === statusFilter) &&
+    (!search || s.email.toLowerCase().includes(search.toLowerCase()) || (s.name || "").toLowerCase().includes(search.toLowerCase()))
+  );
+  const paged = usePaged([search, statusFilter]);
+
+  const counts = {
+    all: subs.length,
+    subscribed: subs.filter(s => s.status === "subscribed").length,
+    unsubscribed: subs.filter(s => s.status === "unsubscribed").length,
+    spam: subs.filter(s => s.status === "spam").length,
+  };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-stone-900">Subscribers</h2>
-          <p className="text-xs text-stone-500 mt-0.5">{subs.length} newsletter subscribers</p>
+          <p className="text-xs text-stone-500 mt-0.5">{counts.subscribed} active · {subs.length} total</p>
         </div>
         {subs.length > 0 && (
           <button onClick={handleExport} className="flex items-center gap-1.5 h-8 px-3 border border-stone-300 text-xs text-stone-600 rounded-full hover:bg-stone-50 transition-colors">
@@ -1702,10 +1734,22 @@ function SubscribersTab() {
         )}
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-stone-400 pointer-events-none" />
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Filter by email…"
-          className="w-full pl-9 pr-4 py-2 border border-stone-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-stone-900/10" />
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-stone-400 pointer-events-none" />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Filter by name or email…"
+            className="w-full pl-9 pr-4 py-2 border border-stone-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-stone-900/10" />
+        </div>
+        <div className="flex gap-1.5 flex-wrap">
+          {(["all", "subscribed", "unsubscribed", "spam"] as const).map(key => (
+            <button key={key} onClick={() => setStatusFilter(key)}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium capitalize transition-colors ${
+                statusFilter === key ? "bg-stone-900 text-white" : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+              }`}>
+              {key} ({counts[key]})
+            </button>
+          ))}
+        </div>
       </div>
 
       {subs.length === 0 ? (
@@ -1716,20 +1760,51 @@ function SubscribersTab() {
         </div>
       ) : (
         <div className="bg-white border border-stone-200 rounded-2xl overflow-x-auto">
-          <table className="w-full min-w-[480px] text-xs">
+          <table className="w-full min-w-[640px] text-xs">
             <thead>
               <tr className="border-b border-stone-100 bg-stone-50">
+                <th className="text-left px-5 py-3 font-bold text-stone-500 uppercase tracking-wider text-[10px]">Name</th>
                 <th className="text-left px-5 py-3 font-bold text-stone-500 uppercase tracking-wider text-[10px]">Email</th>
                 <th className="text-left px-5 py-3 font-bold text-stone-500 uppercase tracking-wider text-[10px]">Source</th>
                 <th className="text-left px-5 py-3 font-bold text-stone-500 uppercase tracking-wider text-[10px]">Date</th>
+                <th className="text-left px-5 py-3 font-bold text-stone-500 uppercase tracking-wider text-[10px]">Status</th>
+                <th className="text-right px-5 py-3 font-bold text-stone-500 uppercase tracking-wider text-[10px]">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100">
               {filtered.slice(paged.from, paged.to).map(s => (
                 <tr key={s.id} className="hover:bg-stone-50 transition-colors">
-                  <td className="px-5 py-3 font-medium text-stone-700">{s.email}</td>
+                  <td className="px-5 py-3 font-medium text-stone-700">{s.name || <span className="text-stone-300 italic">—</span>}</td>
+                  <td className="px-5 py-3 text-stone-500">{s.email}</td>
                   <td className="px-5 py-3 text-stone-500 capitalize">{s.source}</td>
                   <td className="px-5 py-3 text-stone-400 font-mono">{new Date(s.subscribedAt).toLocaleDateString()}</td>
+                  <td className="px-5 py-3">
+                    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold capitalize ${SUB_STATUS_STYLES[s.status] || "bg-stone-100 text-stone-500"}`}>
+                      {s.status}
+                    </span>
+                  </td>
+                  <td className="px-5 py-3">
+                    <div className="flex items-center justify-end gap-1">
+                      {s.status !== "subscribed" && (
+                        <button onClick={() => handleStatus(s.id, "subscribed")} title="Mark subscribed"
+                          className="w-7 h-7 rounded-full flex items-center justify-center text-stone-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors">
+                          <CheckCircle className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      {s.status !== "unsubscribed" && (
+                        <button onClick={() => handleStatus(s.id, "unsubscribed")} title="Mark unsubscribed"
+                          className="w-7 h-7 rounded-full flex items-center justify-center text-stone-400 hover:text-stone-700 hover:bg-stone-200 transition-colors">
+                          <XCircle className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      {s.status !== "spam" && (
+                        <button onClick={() => handleStatus(s.id, "spam")} title="Mark as spam"
+                          className="w-7 h-7 rounded-full flex items-center justify-center text-stone-400 hover:text-rose-600 hover:bg-rose-50 transition-colors">
+                          <AlertCircle className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>

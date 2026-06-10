@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { Send, Check, Instagram } from "lucide-react";
 import Logo from "./Logo";
+import { useTurnstile } from "./TurnstileWidget";
 
 // X (Twitter) — lucide's Twitter glyph is the old bird; use the current X mark.
 const XIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -24,22 +25,35 @@ const SOCIALS = [
 ];
 
 export default function SiteFooter() {
+  const [name, setName]     = useState("");
   const [email, setEmail]   = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [error, setError]   = useState("");
+  const turnstile = useTurnstile();
 
   const handleSubscribe = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !email.includes("@")) return;
     setStatus("loading");
+    setError("");
     try {
       const res = await fetch("/api/subscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, source: "footer" }),
+        body: JSON.stringify({ email, name, source: "footer", turnstileToken: turnstile.token }),
       });
-      setStatus(res.ok ? "done" : "error");
-    } catch {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setStatus("error");
+        setError(data.error || "Something went wrong. Please try again.");
+        turnstile.reset();
+        return;
+      }
       setStatus("done");
+    } catch {
+      setStatus("error");
+      setError("Something went wrong. Please try again.");
+      turnstile.reset();
     }
   };
 
@@ -80,23 +94,34 @@ export default function SiteFooter() {
                 You're in! Check your inbox.
               </div>
             ) : (
-              <form onSubmit={handleSubscribe} className="flex gap-2 max-w-md">
-                <input
-                  type="email"
-                  required
-                  placeholder="your@email.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="flex-1 bg-white/10 border border-white/20 rounded-full px-4 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 focus:ring-1 focus:ring-emerald-400/20 transition-colors"
-                />
-                <button
-                  type="submit"
-                  disabled={status === "loading"}
-                  className="flex items-center gap-1.5 bg-white text-[#0F1F10] rounded-full px-5 py-2.5 text-sm font-semibold hover:bg-emerald-50 transition-colors disabled:opacity-60 flex-shrink-0"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  {status === "loading" ? "…" : "Subscribe"}
-                </button>
+              <form onSubmit={handleSubscribe} className="max-w-md">
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="text"
+                    placeholder="Your name (optional)"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="flex-1 bg-white/10 border border-white/20 rounded-full px-4 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 focus:ring-1 focus:ring-emerald-400/20 transition-colors"
+                  />
+                  <input
+                    type="email"
+                    required
+                    placeholder="your@email.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="flex-1 bg-white/10 border border-white/20 rounded-full px-4 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 focus:ring-1 focus:ring-emerald-400/20 transition-colors"
+                  />
+                  <button
+                    type="submit"
+                    disabled={status === "loading" || (turnstile.enabled && !turnstile.token)}
+                    className="flex items-center justify-center gap-1.5 bg-white text-[#0F1F10] rounded-full px-5 py-2.5 text-sm font-semibold hover:bg-emerald-50 transition-colors disabled:opacity-60 flex-shrink-0"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    {status === "loading" ? "…" : "Subscribe"}
+                  </button>
+                </div>
+                <turnstile.Widget />
+                {error && <p className="text-rose-400 text-xs mt-2">{error}</p>}
               </form>
             )}
           </div>

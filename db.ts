@@ -40,6 +40,16 @@ export async function runMigrations() {
   await pool.query(
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT false"
   );
+  await pool.query(
+    "ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS name TEXT"
+  );
+  await pool.query(
+    "ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'subscribed'"
+  );
+  // Backfill status for existing rows based on unsubscribed_at
+  await pool.query(
+    "UPDATE subscribers SET status='unsubscribed' WHERE unsubscribed_at IS NOT NULL AND status='subscribed'"
+  );
   console.log("[db] Migrations applied ✓");
 }
 
@@ -346,27 +356,56 @@ export async function getAllComments() {
 // SUBSCRIBERS
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function addSubscriber(email: string, source = "footer") {
+function mapSubscriber(row: any) {
+  if (!row) return row;
+  return {
+    id: String(row.id),
+    email: row.email,
+    name: row.name || "Commarade",
+    source: row.source,
+    status: row.status,
+    subscribedAt: row.subscribed_at,
+    unsubscribedAt: row.unsubscribed_at,
+  };
+}
+
+/** Inserts a new subscriber, or re-activates an existing one (resets status to 'subscribed'). */
+export async function addSubscriber(email: string, name?: string, source = "footer") {
   try {
-    await pool.query(
-      "INSERT INTO subscribers (email, source) VALUES ($1,$2) ON CONFLICT (email) DO NOTHING",
-      [email.toLowerCase(), source]
+    const { rows } = await pool.query(
+      `INSERT INTO subscribers (email, name, source, status)
+       VALUES ($1,$2,$3,'subscribed')
+       ON CONFLICT (email) DO UPDATE SET
+         name=COALESCE(EXCLUDED.name, subscribers.name),
+         status='subscribed', unsubscribed_at=NULL
+       RETURNING *`,
+      [email.toLowerCase(), name || null, source]
     );
-    return true;
-  } catch { return false; }
+    return mapSubscriber(rows[0]);
+  } catch { return null; }
 }
 
 export async function getAllSubscribers() {
   const { rows } = await pool.query(
-    "SELECT * FROM subscribers WHERE unsubscribed_at IS NULL ORDER BY subscribed_at DESC"
+    "SELECT * FROM subscribers ORDER BY subscribed_at DESC"
   );
-  return rows;
+  return rows.map(mapSubscriber);
 }
 
-export async function unsubscribe(email: string) {
-  await pool.query(
-    "UPDATE subscribers SET unsubscribed_at=now() WHERE LOWER(email)=LOWER($1)", [email]
+export async function getSubscriberByEmail(email: string) {
+  const { rows } = await pool.query(
+    "SELECT * FROM subscribers WHERE LOWER(email)=LOWER($1)", [email]
   );
+  return mapSubscriber(rows[0]) ?? null;
+}
+
+export async function setSubscriberStatus(idOrEmail: string, status: "subscribed" | "unsubscribed" | "spam") {
+  const { rows } = await pool.query(
+    `UPDATE subscribers SET status=$1, unsubscribed_at=CASE WHEN $1='subscribed' THEN NULL ELSE now() END
+     WHERE id::text=$2 OR LOWER(email)=LOWER($2) RETURNING *`,
+    [status, idOrEmail]
+  );
+  return mapSubscriber(rows[0]) ?? null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
