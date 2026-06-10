@@ -64,12 +64,13 @@ app.use(helmet({
     directives: {
       defaultSrc:     ["'self'"],
       // Google Identity Services: script + iframe + xhr + button styles
-      scriptSrc:      ["'self'", "'unsafe-inline'", "https://accounts.google.com"],
+      // Cloudflare Turnstile: bot/spam protection on forms
+      scriptSrc:      ["'self'", "'unsafe-inline'", "https://accounts.google.com", "https://challenges.cloudflare.com"],
       styleSrc:       ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://accounts.google.com"],
       fontSrc:        ["'self'", "https://fonts.gstatic.com", "data:"],
       imgSrc:         ["'self'", "data:", "https:"],
-      connectSrc:     ["'self'", "https://generativelanguage.googleapis.com", "https://accounts.google.com"],
-      frameSrc:       ["'self'", "https://accounts.google.com"],
+      connectSrc:     ["'self'", "https://generativelanguage.googleapis.com", "https://accounts.google.com", "https://challenges.cloudflare.com"],
+      frameSrc:       ["'self'", "https://accounts.google.com", "https://challenges.cloudflare.com"],
       objectSrc:      ["'none'"],
       upgradeInsecureRequests: [],
     },
