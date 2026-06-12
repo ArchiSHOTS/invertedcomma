@@ -99,3 +99,12 @@ CREATE TABLE IF NOT EXISTS quote_likes (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, quote_id)
 );
+
+-- ── Anatomy (admin-curated deep context per quote) ───────────────────────────
+CREATE TABLE IF NOT EXISTS anatomies (
+  quote_id   TEXT PRIMARY KEY,
+  data       JSONB   NOT NULL,
+  enabled    BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

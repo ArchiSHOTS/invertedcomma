@@ -1,7 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Tag } from "lucide-react";
-import { getEnrichedQuotes } from "../data/quotes";
 import SiteHeader from "../components/SiteHeader";
 import SiteFooter from "../components/SiteFooter";
 import QuoteCard from "../components/QuoteCard";
@@ -13,6 +12,7 @@ import { useCollections } from "../hooks/useCollections";
 import SEO from "../components/SEO";
 
 const BRAND = "#3D5A3E";
+const PAGE_SIZE = 20;
 
 export default function TagPage() {
   const { tag = "" } = useParams<{ tag: string }>();
@@ -24,8 +24,22 @@ export default function TagPage() {
   const [discussionQuote, setDiscussionQuote] = useState<Quote | null>(null);
   const [isDiscussionOpen, setIsDiscussionOpen] = useState(false);
 
-  const allQuotes = getEnrichedQuotes();
+  const [allQuotes, setAllQuotes] = useState<Quote[]>([]);
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    fetch("/api/quotes")
+      .then(r => r.json())
+      .then(d => setAllQuotes(d.quotes || []))
+      .catch(console.error);
+  }, []);
+
+  // Reset to page 1 whenever the tag changes
+  useEffect(() => { setPage(1); }, [tag]);
+
   const taggedQuotes = allQuotes.filter(q => q.tags.includes(tag));
+  const totalPages = Math.max(1, Math.ceil(taggedQuotes.length / PAGE_SIZE));
+  const pagedQuotes = taggedQuotes.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const tagTitle = tag.charAt(0).toUpperCase() + tag.slice(1);
 
@@ -71,8 +85,9 @@ export default function TagPage() {
             <Link to="/" className="text-sm text-[#3D5A3E] hover:underline">Explore all quotes →</Link>
           </div>
         ) : (
+          <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {taggedQuotes.map(q => (
+            {pagedQuotes.map(q => (
               <QuoteCard
                 key={q.id}
                 quote={q}
@@ -87,6 +102,27 @@ export default function TagPage() {
               />
             ))}
           </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-3 mt-10">
+              <button
+                onClick={() => { setPage(p => Math.max(1, p - 1)); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                disabled={page === 1}
+                className="px-4 py-2 text-xs font-semibold rounded-xl border border-stone-200 text-stone-600 hover:border-stone-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Previous
+              </button>
+              <span className="text-xs font-mono text-stone-400">Page {page} of {totalPages}</span>
+              <button
+                onClick={() => { setPage(p => Math.min(totalPages, p + 1)); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                disabled={page === totalPages}
+                className="px-4 py-2 text-xs font-semibold rounded-xl border border-stone-200 text-stone-600 hover:border-stone-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Next
+              </button>
+            </div>
+          )}
+          </>
         )}
       </main>
 

@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Quote as QuoteIcon, Tag, Users, Mail, Bot,
   MessageSquare, ShieldCheck, LogOut, Eye, EyeOff,
   Plus, Trash2, CheckCircle, XCircle, Youtube, FileText,
-  Upload, Sparkles, RefreshCw, ExternalLink, Edit2, Save,
+  Upload, Sparkles, RefreshCw, ExternalLink, Edit2, Save, FileSearch,
   X, ChevronDown, Menu, AlertCircle, BookOpen, Film, Mic2,
   Feather, Newspaper, Hash, Search, BarChart2, Link2,
   Crown, Shield, DollarSign, Megaphone, ShoppingBag, GripVertical,
@@ -747,10 +747,15 @@ function QuotesTab() {
   const [ytUrl, setYtUrl] = useState("");
   const [ytExtracting, setYtExtracting] = useState(false);
   const [extractedQuotes, setExtractedQuotes] = useState<ExtractedQuote[]>([]);
+  const [extractedMeta, setExtractedMeta] = useState<{ videoTitle?: string; channelName?: string; thumbnailUrl?: string } | null>(null);
+  const [ytError, setYtError] = useState("");
+  // Shared attributes applied to all extracted quotes from one source (YouTube or paste) at once.
+  const [sharedAttrs, setSharedAttrs] = useState({ author: "", category: "", source: "", sourceUrl: "", year: "", tags: "" });
   const [selectedExtracted, setSelectedExtracted] = useState<Set<number>>(new Set());
   const [pasteText, setPasteText] = useState("");
   const [pasteExtracting, setPasteExtracting] = useState(false);
   const [pasteExtracted, setPasteExtracted] = useState<any[]>([]);
+  const [selectedPaste, setSelectedPaste] = useState<Set<number>>(new Set());
 
   // Wikiquote import progress (polled while running)
   const [wqImport, setWqImport] = useState<null | {
@@ -864,6 +869,45 @@ function QuotesTab() {
     } finally { setBulkRejecting(false); }
   };
 
+  const [showBulkEdit, setShowBulkEdit] = useState(false);
+  const [bulkEditForm, setBulkEditForm] = useState({ category: "", source: "", sourceUrl: "", year: "", addTags: "" });
+  const [bulkEditing, setBulkEditing] = useState(false);
+
+  const applyBulkEdit = async () => {
+    const ids = [...selected];
+    const addTags = bulkEditForm.addTags.split(",").map(t => t.trim()).filter(Boolean);
+    const yearNum = parseInt(bulkEditForm.year.trim(), 10);
+    const body: any = { ids };
+    if (bulkEditForm.category.trim())  body.category  = bulkEditForm.category.trim();
+    if (bulkEditForm.source.trim())    body.source    = bulkEditForm.source.trim();
+    if (bulkEditForm.sourceUrl.trim()) body.sourceUrl = bulkEditForm.sourceUrl.trim();
+    if (!Number.isNaN(yearNum))        body.year      = yearNum;
+    if (addTags.length)                body.addTags   = addTags;
+    if (Object.keys(body).length === 1) { setShowBulkEdit(false); return; } // nothing but ids
+
+    setBulkEditing(true);
+    try {
+      const res = await fetch("/api/admin/quotes/bulk/edit", {
+        method: "POST", headers: authHeaders(), body: JSON.stringify(body),
+      });
+      if (!res.ok) { alert("Bulk edit failed — please try again."); return; }
+      setQuotes(prev => prev.map(q => {
+        if (!selected.has(q.id)) return q;
+        return {
+          ...q,
+          category:  body.category  ?? q.category,
+          source:    body.source    ?? q.source,
+          sourceUrl: body.sourceUrl ?? (q as any).sourceUrl,
+          year:      body.year      ?? q.year,
+          tags:      addTags.length ? [...new Set([...(q.tags || []), ...addTags])] : q.tags,
+        };
+      }));
+      setShowBulkEdit(false);
+      setBulkEditForm({ category: "", source: "", sourceUrl: "", year: "", addTags: "" });
+      setSelected(new Set());
+    } finally { setBulkEditing(false); }
+  };
+
   const toggleSelect = (id: string) => {
     const s = new Set(selected);
     if (s.has(id)) s.delete(id); else s.add(id);
@@ -896,27 +940,75 @@ function QuotesTab() {
   const handleYouTubeExtract = async () => {
     setYtExtracting(true);
     setExtractedQuotes([]);
+    setExtractedMeta(null);
+    setYtError("");
     try {
       const res = await fetch("/api/admin/extract-youtube", {
         method: "POST", headers: authHeaders(), body: JSON.stringify({ url: ytUrl }),
       });
+      const data = await res.json();
       if (res.ok) {
-        const data = await res.json();
         setExtractedQuotes(data.quotes || []);
+        setExtractedMeta({ videoTitle: data.videoTitle, channelName: data.channelName, thumbnailUrl: data.thumbnailUrl });
         setSelectedExtracted(new Set(data.quotes.map((_: any, i: number) => i)));
+        // Pre-fill shared attributes from the source video — admin can adjust before saving.
+        setSharedAttrs({
+          author: "",
+          category: "",
+          source: data.channelName ? `YouTube — ${data.channelName}` : "YouTube",
+          sourceUrl: data.videoUrl || "",
+          year: "",
+          tags: "",
+        });
+      } else {
+        setYtError(data.error || "Extraction failed.");
       }
+    } catch {
+      setYtError("Extraction failed.");
     } finally { setYtExtracting(false); }
   };
 
+  // Apply the shared attributes bar to every extracted quote in a list (per-quote
+  // fields can still be overridden afterwards).
+  const applySharedAttrs = (next: typeof sharedAttrs) => {
+    setSharedAttrs(next);
+    const tags = next.tags.split(",").map(t => t.trim()).filter(Boolean);
+    // A blank shared field leaves each quote's existing value (AI-detected author, etc.) untouched.
+    const patch = (eq: any) => ({
+      ...eq,
+      author:    next.author || eq.author || eq.speaker,
+      category:  next.category,
+      source:    next.source,
+      sourceUrl: next.sourceUrl,
+      year:      next.year,
+      tags,
+    });
+    setExtractedQuotes(prev => prev.map(patch));
+    setPasteExtracted(prev => prev.map(patch));
+  };
+
   const handleSaveExtracted = async () => {
-    const toSave = extractedQuotes.filter((_, i) => selectedExtracted.has(i));
+    const toSave = extractedQuotes.filter((_, i) => selectedExtracted.has(i)).map(eq => ({
+      text:      eq.text,
+      author:    eq.speaker,
+      context:   eq.context,
+      category:  eq.category || sharedAttrs.category,
+      source:    eq.source ?? sharedAttrs.source,
+      sourceUrl: eq.sourceUrl ?? sharedAttrs.sourceUrl,
+      year:      parseInt((eq as any).year || sharedAttrs.year, 10) || undefined,
+      tags:      (eq.tags && eq.tags.length) ? eq.tags : eq.suggestedTags,
+      youtubeId: eq.youtubeId,
+      status:    "pending",
+    }));
     const res = await fetch("/api/admin/quotes/bulk", {
       method: "POST", headers: authHeaders(), body: JSON.stringify({ quotes: toSave }),
     });
     if (res.ok) {
       const data = await res.json();
       setQuotes(prev => [...data.quotes, ...prev]);
-      setExtractedQuotes([]); setYtUrl(""); setAddMode(null);
+      setExtractedQuotes([]); setExtractedMeta(null); setYtError(""); setYtUrl(""); setAddMode(null);
+    } else {
+      setYtError("Failed to save selected quotes — please try again.");
     }
   };
 
@@ -926,7 +1018,15 @@ function QuotesTab() {
       const res = await fetch("/api/admin/extract-text", {
         method: "POST", headers: authHeaders(), body: JSON.stringify({ text: pasteText }),
       });
-      if (res.ok) { const data = await res.json(); setPasteExtracted(data.quotes || []); }
+      if (res.ok) {
+        const data = await res.json();
+        // Drop the AI's placeholder "source" so the admin-entered shared Source wins on save.
+        const quotes = (data.quotes || []).map((q: any) => ({ ...q, source: undefined }));
+        setPasteExtracted(quotes);
+        setSelectedPaste(new Set(quotes.map((_: any, i: number) => i)));
+        // Start with a clean shared bar — admin fills author / source / link for the pasted source.
+        setSharedAttrs({ author: "", category: "", source: "", sourceUrl: "", year: "", tags: "" });
+      }
     } finally { setPasteExtracting(false); }
   };
 
@@ -1032,6 +1132,20 @@ function QuotesTab() {
               {ytExtracting ? "Extracting…" : "Extract"}
             </button>
           </div>
+          {ytError && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">{ytError}</p>
+          )}
+          {extractedMeta && (extractedMeta.videoTitle || extractedMeta.channelName) && (
+            <div className="flex items-center gap-3 p-3 border border-stone-200 rounded-xl bg-white">
+              {extractedMeta.thumbnailUrl && (
+                <img src={extractedMeta.thumbnailUrl} alt="" className="w-16 h-9 object-cover rounded-md flex-shrink-0" />
+              )}
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-stone-800 truncate">{extractedMeta.videoTitle}</p>
+                <p className="text-[10px] text-stone-500">{extractedMeta.channelName} · check this matches the link you shared</p>
+              </div>
+            </div>
+          )}
           {extractedQuotes.length > 0 && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -1039,6 +1153,18 @@ function QuotesTab() {
                 <div className="flex gap-3 text-[10px] text-stone-500">
                   <button onClick={() => setSelectedExtracted(new Set(extractedQuotes.map((_, i) => i)))} className="hover:text-stone-800">Select all</button>
                   <button onClick={() => setSelectedExtracted(new Set())} className="hover:text-stone-800">None</button>
+                </div>
+              </div>
+              <div className="bg-white border border-stone-200 rounded-xl p-3 space-y-2">
+                <p className="text-[10px] uppercase tracking-wider font-bold text-stone-400">
+                  Shared attributes — applied to all {extractedQuotes.length} quotes (editable per-quote below)
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input value={sharedAttrs.category} onChange={e => applySharedAttrs({ ...sharedAttrs, category: e.target.value })} placeholder="Category (e.g. Mindset)" className="border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900/10" />
+                  <input value={sharedAttrs.tags} onChange={e => applySharedAttrs({ ...sharedAttrs, tags: e.target.value })} placeholder="Tags (comma-separated)" className="border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900/10" />
+                  <input value={sharedAttrs.source} onChange={e => applySharedAttrs({ ...sharedAttrs, source: e.target.value })} placeholder="Source" className="border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900/10" />
+                  <input value={sharedAttrs.sourceUrl} onChange={e => applySharedAttrs({ ...sharedAttrs, sourceUrl: e.target.value })} placeholder="Source URL (https://…)" className="border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900/10" />
+                  <input type="number" value={sharedAttrs.year} onChange={e => applySharedAttrs({ ...sharedAttrs, year: e.target.value })} placeholder="Year (e.g. 2009)" className="border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900/10" />
                 </div>
               </div>
               <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
@@ -1050,6 +1176,12 @@ function QuotesTab() {
                     <div className="flex-1 min-w-0 space-y-1">
                       <p className="font-serif italic text-sm leading-snug">"{eq.text}"</p>
                       <p className="text-[10px] font-bold text-stone-500">— {eq.speaker} · {Math.floor(eq.startSeconds / 60)}:{String(eq.startSeconds % 60).padStart(2, "0")}</p>
+                      <div className="flex gap-2 pt-1" onClick={e => e.preventDefault()}>
+                        <input value={eq.category ?? ""} onChange={e => setExtractedQuotes(prev => prev.map((q, qi) => qi === i ? { ...q, category: e.target.value } : q))}
+                          placeholder="Category" className="flex-1 border border-stone-200 rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-stone-900/10" />
+                        <input value={(eq.tags ?? []).join(", ")} onChange={e => setExtractedQuotes(prev => prev.map((q, qi) => qi === i ? { ...q, tags: e.target.value.split(",").map(t => t.trim()).filter(Boolean) } : q))}
+                          placeholder="Tags" className="flex-1 border border-stone-200 rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-stone-900/10" />
+                      </div>
                     </div>
                   </label>
                 ))}
@@ -1059,7 +1191,7 @@ function QuotesTab() {
                   className="h-9 px-5 bg-stone-900 text-white text-xs font-bold rounded-xl disabled:opacity-40">
                   Add {selectedExtracted.size} selected
                 </button>
-                <button onClick={() => { setExtractedQuotes([]); setYtUrl(""); setAddMode(null); }}
+                <button onClick={() => { setExtractedQuotes([]); setExtractedMeta(null); setYtError(""); setYtUrl(""); setAddMode(null); }}
                   className="h-9 px-4 border border-stone-200 text-xs text-stone-600 rounded-xl">Cancel</button>
               </div>
             </div>
@@ -1083,19 +1215,69 @@ function QuotesTab() {
             <button onClick={() => setAddMode(null)} className="h-9 px-4 border border-stone-200 text-xs text-stone-600 rounded-xl">Cancel</button>
           </div>
           {pasteExtracted.length > 0 && (
-            <div className="space-y-2 max-h-72 overflow-y-auto border border-stone-200 rounded-xl p-3 bg-white">
-              {pasteExtracted.map((eq, i) => (
-                <div key={i} className="p-3 bg-stone-50 rounded-xl space-y-1">
-                  <p className="font-serif italic text-sm">"{eq.text}"</p>
-                  <p className="text-xs font-bold text-stone-500">— {eq.author || eq.speaker}</p>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold">{pasteExtracted.length} quotes found</p>
+                <div className="flex gap-3 text-[10px] text-stone-500">
+                  <button onClick={() => setSelectedPaste(new Set(pasteExtracted.map((_, i) => i)))} className="hover:text-stone-800">Select all</button>
+                  <button onClick={() => setSelectedPaste(new Set())} className="hover:text-stone-800">None</button>
                 </div>
-              ))}
-              <button onClick={async () => {
-                await fetch("/api/admin/quotes/bulk", { method: "POST", headers: authHeaders(), body: JSON.stringify({ quotes: pasteExtracted }) });
-                load(); setPasteExtracted([]); setPasteText(""); setAddMode(null);
-              }} className="w-full h-9 bg-stone-900 text-white text-xs font-bold rounded-xl mt-2">
-                Add all {pasteExtracted.length} quotes
-              </button>
+              </div>
+              <div className="bg-white border border-stone-200 rounded-xl p-3 space-y-2">
+                <p className="text-[10px] uppercase tracking-wider font-bold text-stone-400">
+                  Shared attributes — applied to all {pasteExtracted.length} quotes (editable per-quote below)
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input value={sharedAttrs.author} onChange={e => applySharedAttrs({ ...sharedAttrs, author: e.target.value })} placeholder="Author / speaker (applies to all)" className="border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900/10" />
+                  <input value={sharedAttrs.category} onChange={e => applySharedAttrs({ ...sharedAttrs, category: e.target.value })} placeholder="Category (e.g. Mindset)" className="border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900/10" />
+                  <input value={sharedAttrs.source} onChange={e => applySharedAttrs({ ...sharedAttrs, source: e.target.value })} placeholder="Source (e.g. essay / speech title)" className="border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900/10" />
+                  <input value={sharedAttrs.sourceUrl} onChange={e => applySharedAttrs({ ...sharedAttrs, sourceUrl: e.target.value })} placeholder="Source link (https://…)" className="border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900/10" />
+                  <input type="number" value={sharedAttrs.year} onChange={e => applySharedAttrs({ ...sharedAttrs, year: e.target.value })} placeholder="Year (e.g. 2009)" className="border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900/10 sm:col-span-2" />
+                  <input value={sharedAttrs.tags} onChange={e => applySharedAttrs({ ...sharedAttrs, tags: e.target.value })} placeholder="Tags (comma-separated)" className="border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900/10 sm:col-span-2" />
+                </div>
+              </div>
+              <div className="space-y-2 max-h-72 overflow-y-auto border border-stone-200 rounded-xl p-3 bg-white">
+                {pasteExtracted.map((eq, i) => (
+                  <label key={i} className={`flex gap-3 p-3 border rounded-xl cursor-pointer transition-colors ${selectedPaste.has(i) ? "border-stone-900 bg-stone-50" : "border-stone-200 bg-white hover:bg-stone-50"}`}>
+                    <input type="checkbox" checked={selectedPaste.has(i)}
+                      onChange={() => setSelectedPaste(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; })}
+                      className="mt-0.5 accent-stone-900 flex-shrink-0" />
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <p className="font-serif italic text-sm leading-snug">"{eq.text}"</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1" onClick={e => e.preventDefault()}>
+                        <input value={eq.author ?? eq.speaker ?? ""} onChange={e => setPasteExtracted(prev => prev.map((q, qi) => qi === i ? { ...q, author: e.target.value } : q))}
+                          placeholder="Author" className="border border-stone-200 rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-stone-900/10" />
+                        <input value={eq.category ?? ""} onChange={e => setPasteExtracted(prev => prev.map((q, qi) => qi === i ? { ...q, category: e.target.value } : q))}
+                          placeholder="Category" className="border border-stone-200 rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-stone-900/10" />
+                        <input value={(eq.tags ?? []).join(", ")} onChange={e => setPasteExtracted(prev => prev.map((q, qi) => qi === i ? { ...q, tags: e.target.value.split(",").map((t: string) => t.trim()).filter(Boolean) } : q))}
+                          placeholder="Tags" className="border border-stone-200 rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-stone-900/10" />
+                      </div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={async () => {
+                  const toSave = pasteExtracted.filter((_, i) => selectedPaste.has(i)).map(eq => ({
+                    text:      eq.text,
+                    author:    eq.author || sharedAttrs.author || eq.speaker,
+                    context:   eq.context,
+                    category:  eq.category || sharedAttrs.category,
+                    source:    eq.source ?? sharedAttrs.source,
+                    sourceUrl: eq.sourceUrl ?? sharedAttrs.sourceUrl,
+                    year:      parseInt(eq.year || sharedAttrs.year, 10) || undefined,
+                    tags:      (eq.tags && eq.tags.length) ? eq.tags : eq.suggestedTags,
+                    status:    "pending",
+                  }));
+                  await fetch("/api/admin/quotes/bulk", { method: "POST", headers: authHeaders(), body: JSON.stringify({ quotes: toSave }) });
+                  load(); setPasteExtracted([]); setSelectedPaste(new Set()); setPasteText(""); setAddMode(null);
+                }} disabled={selectedPaste.size === 0}
+                  className="h-9 px-5 bg-stone-900 text-white text-xs font-bold rounded-xl disabled:opacity-40">
+                  Add {selectedPaste.size} selected
+                </button>
+                <button onClick={() => { setPasteExtracted([]); setSelectedPaste(new Set()); setPasteText(""); setAddMode(null); }}
+                  className="h-9 px-4 border border-stone-200 text-xs text-stone-600 rounded-xl">Cancel</button>
+              </div>
             </div>
           )}
         </div>
@@ -1103,28 +1285,67 @@ function QuotesTab() {
 
       {/* Bulk toolbar */}
       {selected.size > 0 && (
-        <div className="sticky top-20 bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between gap-4">
-          <span className="text-sm font-medium text-emerald-900">{selected.size} selected</span>
-          <div className="flex gap-2">
-            <button
-              onClick={bulkApprove} disabled={bulkApproving}
-              className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-semibold rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors flex items-center gap-1.5"
-            >
-              <CheckCircle className="w-3.5 h-3.5" /> {bulkApproving ? "Approving…" : `Approve (${selected.size})`}
-            </button>
-            <button
-              onClick={bulkReject} disabled={bulkRejecting}
-              className="px-3 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors flex items-center gap-1.5"
-            >
-              <XCircle className="w-3.5 h-3.5" /> {bulkRejecting ? "Rejecting…" : `Reject (${selected.size})`}
-            </button>
-            <button
-              onClick={() => setSelected(new Set())}
-              className="px-3 py-1.5 bg-stone-200 text-stone-600 text-xs font-semibold rounded-lg hover:bg-stone-300 transition-colors"
-            >
-              Clear
-            </button>
+        <div className="sticky top-20 bg-emerald-50 border border-emerald-200 rounded-xl p-3 space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-sm font-medium text-emerald-900">{selected.size} selected</span>
+            <div className="flex gap-2">
+              <button
+                onClick={bulkApprove} disabled={bulkApproving}
+                className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-semibold rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+              >
+                <CheckCircle className="w-3.5 h-3.5" /> {bulkApproving ? "Approving…" : `Approve (${selected.size})`}
+              </button>
+              <button
+                onClick={bulkReject} disabled={bulkRejecting}
+                className="px-3 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+              >
+                <XCircle className="w-3.5 h-3.5" /> {bulkRejecting ? "Rejecting…" : `Reject (${selected.size})`}
+              </button>
+              <button
+                onClick={() => setShowBulkEdit(v => !v)}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 ${showBulkEdit ? "bg-stone-900 text-white" : "bg-white border border-stone-300 text-stone-700 hover:border-stone-400"}`}
+              >
+                <Edit2 className="w-3.5 h-3.5" /> Edit attributes
+              </button>
+              <button
+                onClick={() => { setSelected(new Set()); setShowBulkEdit(false); }}
+                className="px-3 py-1.5 bg-stone-200 text-stone-600 text-xs font-semibold rounded-lg hover:bg-stone-300 transition-colors"
+              >
+                Clear
+              </button>
+            </div>
           </div>
+          {showBulkEdit && (
+            <div className="bg-white border border-stone-200 rounded-xl p-3 space-y-2">
+              <p className="text-[10px] uppercase tracking-wider font-bold text-stone-400">
+                Apply to {selected.size} selected quote{selected.size === 1 ? "" : "s"} — leave a field blank to leave it unchanged
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <input value={bulkEditForm.category} onChange={e => setBulkEditForm(p => ({ ...p, category: e.target.value }))}
+                  placeholder="Category (e.g. Mindset)"
+                  className="border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900/10" />
+                <input value={bulkEditForm.addTags} onChange={e => setBulkEditForm(p => ({ ...p, addTags: e.target.value }))}
+                  placeholder="Add tags (comma-separated)"
+                  className="border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900/10" />
+                <input value={bulkEditForm.source} onChange={e => setBulkEditForm(p => ({ ...p, source: e.target.value }))}
+                  placeholder="Source (e.g. YouTube — Simon Sinek)"
+                  className="border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900/10" />
+                <input value={bulkEditForm.sourceUrl} onChange={e => setBulkEditForm(p => ({ ...p, sourceUrl: e.target.value }))}
+                  placeholder="Source URL (https://…)"
+                  className="border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900/10" />
+                <input type="number" value={bulkEditForm.year} onChange={e => setBulkEditForm(p => ({ ...p, year: e.target.value }))}
+                  placeholder="Year (e.g. 2009)"
+                  className="border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900/10" />
+              </div>
+              <div className="flex gap-2">
+                <button onClick={applyBulkEdit} disabled={bulkEditing}
+                  className="h-9 px-5 bg-stone-900 text-white text-xs font-bold rounded-xl disabled:opacity-50">
+                  {bulkEditing ? "Applying…" : `Apply to ${selected.size}`}
+                </button>
+                <button onClick={() => setShowBulkEdit(false)} className="h-9 px-4 border border-stone-200 text-xs text-stone-600 rounded-xl">Cancel</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1201,6 +1422,10 @@ function QuotesTab() {
                   <button onClick={() => startEdit(q)} className="w-7 h-7 border border-stone-200 rounded-full flex items-center justify-center text-stone-500 hover:bg-stone-50" title="Edit">
                     <Edit2 className="w-3 h-3" />
                   </button>
+                  <a href={`/q/${q.slug}#anatomy`} target="_blank" rel="noopener noreferrer"
+                    className="w-7 h-7 border border-stone-200 rounded-full flex items-center justify-center text-stone-500 hover:bg-stone-50" title="Create / edit anatomy">
+                    <FileSearch className="w-3 h-3" />
+                  </a>
                   {q.status === "pending" && (
                     <>
                       <button onClick={() => handleApprove(q.id)} className="w-7 h-7 border border-emerald-300 rounded-full flex items-center justify-center text-emerald-600 hover:bg-emerald-50" title="Approve">

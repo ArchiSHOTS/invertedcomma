@@ -51,6 +51,20 @@ export interface Quote {
   sponsorUrl?: string;
 }
 
+// ── Anatomy (admin-curated deep context per quote) ────────────────────────────
+export type AnatomySectionKey =
+  | "context" | "makers" | "discussions" | "relevance" | "evolution" | "further_reading";
+
+export interface AnatomySection {
+  body: string;
+  enabled: boolean;
+}
+
+export interface Anatomy {
+  enabled: boolean;
+  sections: Partial<Record<AnatomySectionKey, AnatomySection>>;
+}
+
 export interface Comment {
   id: string;
   username: string;
@@ -143,4 +157,8 @@ export interface ExtractedQuote {
   context: string;
   suggestedTags: string[];
   youtubeId: string;
+  category?: string;
+  source?: string;
+  sourceUrl?: string;
+  tags?: string[];
 }

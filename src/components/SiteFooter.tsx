@@ -184,6 +184,11 @@ export default function SiteFooter() {
               This site contains advertising. Sponsored content is clearly
               labelled.
             </p>
+            <p>
+              Sections labelled “AI generated” (Context, Deep Dive, Anatomy and
+              counterpoints) are produced or assisted by AI and may contain
+              errors. Verify important facts independently.
+            </p>
             <p className="pt-2 border-t border-white/10">
               © {new Date().getFullYear()} Inverted Comma.
               <br />All rights reserved.

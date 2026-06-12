@@ -46,10 +46,11 @@ import {
   createUser, updateUser, deleteUser, toggleBookmark,
   getAuthorBySlug, getAllAuthors, upsertAuthor,
   getRuntimeQuotes, getRuntimeQuoteBySlug, createRuntimeQuote,
-  updateRuntimeQuote, deleteRuntimeQuote, bulkSetRuntimeQuoteStatus,
+  updateRuntimeQuote, deleteRuntimeQuote, bulkSetRuntimeQuoteStatus, bulkEditRuntimeQuotes,
   getComments, createComment, likeComment, deleteComment, getAllComments,
   addSubscriber, getAllSubscribers, setSubscriberStatus,
   getInsight, setInsight,
+  getAnatomy, upsertAnatomy, getAnatomyQuoteIds,
   toggleQuoteLike,
 } from "./db.ts";
 import { sendVerificationEmail, sendWelcomeEmail, sendSubscriberWelcomeEmail, type WelcomeQuote } from "./email.ts";
@@ -257,15 +258,16 @@ if (apiKey) {
 const MODELS = ["gemini-2.5-flash-lite", "gemini-2.5-flash"];
 
 async function generateWithFallback(
-  contents: string,
-  config: Record<string, any> = {}
+  contents: string | any[],
+  config: Record<string, any> = {},
+  models: string[] = MODELS
 ): Promise<any> {
   if (!aiClient) throw new Error("No AI client");
   let lastErr: any;
-  for (const model of MODELS) {
+  for (const model of models) {
     try {
       const res = await aiClient.models.generateContent({ model, contents, config });
-      if (MODELS.indexOf(model) > 0) console.log(`[Gemini] Used fallback model: ${model}`);
+      if (models.indexOf(model) > 0) console.log(`[Gemini] Used fallback model: ${model}`);
       return res;
     } catch (err: any) {
       const status = JSON.parse(err.message || "{}").error?.code;
@@ -602,6 +604,101 @@ function extractYouTubeId(url: string): string | null {
   ];
   for (const p of patterns) { const m = url.match(p); if (m) return m[1]; }
   return null;
+}
+
+// Gemini responses (especially with googleSearch grounding) sometimes wrap the JSON
+// array in markdown fences and/or trailing commentary/citations. Pull out just the
+// outermost [...] array before parsing.
+function extractJsonArray(raw: string): any[] {
+  const stripped = raw.trim().replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
+  const start = stripped.indexOf("[");
+  if (start === -1) return [];
+
+  // Walk from the first '[' tracking bracket depth (ignoring brackets inside
+  // string literals) to find its *matching* close. A naive first-to-last-bracket
+  // slice breaks when the model appends grounding citations like "[1]" after the
+  // array — the trailing text then trips JSON.parse with "non-whitespace after JSON".
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < stripped.length; i++) {
+    const ch = stripped[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') { inStr = true; continue; }
+    if (ch === "[") depth++;
+    else if (ch === "]" && --depth === 0) {
+      try { return JSON.parse(stripped.slice(start, i + 1)); }
+      catch { return []; }
+    }
+  }
+  return [];
+}
+
+function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n/g, " ")
+    .trim();
+}
+
+// Fetches the video's title, channel name, and timestamped transcript by scraping
+// the public watch page for caption track URLs. Returns null if no captions exist.
+async function fetchYouTubeTranscript(videoId: string): Promise<{ title: string; author: string; transcript: string } | null> {
+  const pageRes = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+    headers: {
+      "Accept-Language": "en-US,en;q=0.9",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    },
+  });
+  if (!pageRes.ok) return null;
+  const html = await pageRes.text();
+
+  const titleMatch  = html.match(/"title":"((?:[^"\\]|\\.)*)"/);
+  const authorMatch = html.match(/"author":"((?:[^"\\]|\\.)*)"/);
+  const title  = titleMatch  ? JSON.parse(`"${titleMatch[1]}"`)  : "";
+  const author = authorMatch ? JSON.parse(`"${authorMatch[1]}"`) : "";
+
+  const captionsMatch = html.match(/"captionTracks":(\[.*?\])/);
+  if (!captionsMatch) return null;
+
+  let tracks: any[];
+  try { tracks = JSON.parse(captionsMatch[1]); } catch { return null; }
+  if (!tracks.length) return null;
+
+  const track = tracks.find(t => t.languageCode?.startsWith("en")) || tracks[0];
+  const baseUrl = track.baseUrl?.replace(/\\u0026/g, "&");
+  if (!baseUrl) return null;
+
+  const capRes = await fetch(baseUrl);
+  if (!capRes.ok) return null;
+  const xml = await capRes.text();
+
+  const transcript = [...xml.matchAll(/<text start="([\d.]+)"[^>]*>([\s\S]*?)<\/text>/g)]
+    .map(m => `[${Math.round(parseFloat(m[1]))}s] ${decodeHtmlEntities(m[2])}`)
+    .join("\n");
+
+  if (!transcript.trim()) return null;
+  return { title, author, transcript };
+}
+
+// Lightweight, reliable metadata lookup (title + uploading channel) via YouTube's public oEmbed endpoint.
+async function fetchYouTubeOEmbed(videoId: string): Promise<{ title: string; author: string } | null> {
+  try {
+    const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}&format=json`;
+    const res = await fetch(oembedUrl);
+    if (!res.ok) return null;
+    const data: any = await res.json();
+    return { title: data.title || "", author: data.author_name || "" };
+  } catch {
+    return null;
+  }
 }
 
 function slugify(text: string, author: string): string {
@@ -1025,10 +1122,11 @@ app.post("/api/admin/quotes/bulk", adminMiddleware, async (req: any, res) => {
       text:       q.text,
       author:     q.author || "Unknown",
       source:     q.source || (q.youtubeId ? `youtube:${q.youtubeId}` : ""),
+      sourceUrl:  q.sourceUrl || (q.youtubeId ? `https://www.youtube.com/watch?v=${q.youtubeId}` : null),
       year:       q.year ? Number(q.year) : null,
       category:   q.category || "Uncategorized",
       context:    q.context || "",
-      tags:       Array.isArray(q.suggestedTags) ? q.suggestedTags : [],
+      tags:       Array.isArray(q.tags) ? q.tags : (Array.isArray(q.suggestedTags) ? q.suggestedTags : []),
       status:     q.status || "published",
       submittedBy:req.userId,
     });
@@ -1085,6 +1183,25 @@ async function bulkSetStatus(req: any, res: any, newStatus: string) {
 
 app.post("/api/admin/quotes/bulk/approve", adminMiddleware, (req, res) => bulkSetStatus(req, res, "published"));
 app.post("/api/admin/quotes/bulk/reject",  adminMiddleware, (req, res) => bulkSetStatus(req, res, "rejected"));
+
+// Bulk-edit shared attributes (category, source, source URL, tags) across many quotes at once —
+// e.g. select all "mindset" results and tag/categorise them together.
+const BulkEditSchema = z.object({
+  ids:       z.array(z.string()).min(1),
+  category:  z.string().max(100).optional(),
+  source:    z.string().max(200).optional(),
+  sourceUrl: z.string().url().optional().or(z.literal("")),
+  year:      z.number().int().min(-3000).max(new Date().getFullYear() + 1).optional(),
+  addTags:   z.array(z.string().max(40)).max(20).optional(),
+});
+
+app.post("/api/admin/quotes/bulk/edit", adminMiddleware, async (req, res) => {
+  const parsed = BulkEditSchema.safeParse(req.body || {});
+  if (!parsed.success) return res.status(400).json({ error: "Invalid request" });
+  const { ids, category, source, sourceUrl, year, addTags } = parsed.data;
+  const updated = await bulkEditRuntimeQuotes(ids, { category, source, sourceUrl: sourceUrl || undefined, year, addTags });
+  res.json({ updated });
+});
 
 app.post("/api/admin/quotes/:id/approve", adminMiddleware, async (req, res) => {
   const q = await updateRuntimeQuote(req.params.id, { status: "published" });
@@ -1274,9 +1391,39 @@ app.post("/api/admin/extract-youtube", adminMiddleware, async (req, res) => {
   if (!aiClient) return res.status(503).json({ error: "AI client not configured. Set GEMINI_API_KEY in .env" });
 
   try {
-    const prompt = `You are a quote extraction expert. Analyze the YouTube video at https://www.youtube.com/watch?v=${videoId}
+    // oEmbed gives us a reliable title + uploading channel for grounding, regardless of
+    // whether we can pull a full transcript.
+    const oembed = await fetchYouTubeOEmbed(videoId);
+    const videoTitle  = oembed?.title  || "";
+    const channelName = oembed?.author || "";
 
-Extract the most insightful, thought-provoking, or memorable quotes. For each quote provide the exact text, speaker name, approximate start/end timestamps (seconds), brief context, and 2-4 relevant topic tags.
+    if (!videoTitle && !channelName) {
+      return res.status(422).json({ error: "Could not find this video. Double-check the URL." });
+    }
+
+    // Best case: pull the real timestamped transcript so extraction is grounded in
+    // what was actually said — not a guess based on title/channel alone.
+    const transcriptMeta = await fetchYouTubeTranscript(videoId);
+
+    let extracted: any[] = [];
+
+    if (transcriptMeta?.transcript) {
+      const speakerName = transcriptMeta.author || channelName;
+      const truncated = transcriptMeta.transcript.length > 40000
+        ? transcriptMeta.transcript.slice(0, 40000) + "\n[...transcript truncated]"
+        : transcriptMeta.transcript;
+
+      const prompt = `You are a quote extraction expert. Below is the actual timestamped transcript of a YouTube video.
+
+Video title: "${transcriptMeta.title || videoTitle}"
+Channel/Speaker: "${speakerName}"
+
+Transcript:
+"""
+${truncated}
+"""
+
+Extract the most insightful, thought-provoking, or memorable quotes spoken in THIS transcript — verbatim, lightly cleaned up for filler words/false starts only. The "speaker" field must be "${speakerName}" unless the transcript clearly shows a different named guest speaking. Use the "[Ns]" markers in the transcript to determine accurate startSeconds/endSeconds for each quote. For each quote provide the exact text, speaker name, start/end timestamps (seconds), brief context, and 2-4 relevant topic tags.
 
 Return a valid JSON array:
 [
@@ -1293,14 +1440,58 @@ Return a valid JSON array:
 
 Extract 3-10 quotes. Return ONLY the JSON array.`;
 
-    const response = await generateWithFallback(prompt, { temperature: 0.3, responseMimeType: "application/json" });
-    const raw      = response.text?.trim() || "[]";
-    const jsonStr  = raw.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
-    const extracted = JSON.parse(jsonStr);
+      const response = await generateWithFallback(prompt, { temperature: 0.3, responseMimeType: "application/json" });
+      extracted = extractJsonArray(response.text || "[]");
+      if (extracted.length === 0) {
+        console.warn(`[extract-youtube] transcript path returned 0 quotes for ${videoId}, raw length=${(response.text || "").length}`);
+      }
+    }
+
+    // No transcript (common — YouTube's caption CDN blocks datacenter IPs), or the
+    // transcript path came back empty. Fall back to web-grounded search using the
+    // verified title/channel so the model researches the actual speaker instead of guessing.
+    if (extracted.length === 0) {
+      const prompt = `You are a quote extraction expert researching a specific YouTube video.
+
+Video title: "${videoTitle}"
+Uploaded by channel: "${channelName}"
+URL: https://www.youtube.com/watch?v=${videoId}
+
+Step 1: Identify the actual speaker. Use the title to figure out who is speaking (the uploading channel may just be a re-poster, not the speaker) — e.g. "Simon Sinek" for a video titled "... TED Talk from Simon Sinek". If the channel name itself looks like a real person's name and the title doesn't suggest otherwise, the channel owner is the speaker.
+
+Step 2: Search the web for a transcript, article, or reliable coverage of THIS video, OR — if that's not findable — for well-documented quotes by the identified speaker on the same topic as this video's title (e.g. official transcripts on ted.com, interview transcripts, articles quoting them on this subject).
+
+Step 3: Extract the most insightful, thought-provoking, or memorable quotes, attributed to the speaker identified in Step 1. Only return an empty array if you cannot confidently identify who the speaker even is — do NOT substitute a different person as the speaker.
+
+Return a valid JSON array (no markdown fences):
+[
+  {
+    "text": "exact quote text",
+    "speaker": "Speaker Name",
+    "startSeconds": 0,
+    "endSeconds": 0,
+    "context": "Brief context",
+    "suggestedTags": ["tag1", "tag2"],
+    "youtubeId": "${videoId}"
+  }
+]
+
+Extract up to 10 quotes. Use 0 for startSeconds/endSeconds if timestamps are unknown. Return ONLY the JSON array.`;
+
+      const response = await generateWithFallback(prompt, { tools: [{ googleSearch: {} }], temperature: 0.3 });
+      extracted = extractJsonArray(response.text || "[]");
+      if (extracted.length === 0) {
+        console.warn(`[extract-youtube] search-grounded path returned 0 quotes for ${videoId}, raw length=${(response.text || "").length}, raw="${(response.text || "").slice(0, 300)}"`);
+      }
+    }
+
     if (!Array.isArray(extracted)) return res.status(500).json({ error: "AI returned unexpected format" });
+    if (extracted.length === 0) {
+      return res.status(422).json({ error: "Couldn't find quotable content for this video. Try the 'Paste text' option with a transcript instead." });
+    }
 
     res.json({
-      ok: true, videoId,
+      ok: true, videoId, videoTitle, channelName,
       videoUrl:     `https://www.youtube.com/watch?v=${videoId}`,
       thumbnailUrl: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
       quotes: extracted, count: extracted.length,
@@ -1312,7 +1503,7 @@ Extract 3-10 quotes. Return ONLY the JSON array.`;
 });
 
 app.post("/api/admin/extract-text", adminMiddleware, async (req, res) => {
-  const { text, source } = req.body;
+  const { text } = req.body;
   if (!text || text.trim().length < 50) return res.status(400).json({ error: "Paste at least 50 characters of text" });
   if (!aiClient) return res.status(503).json({ error: "AI client not configured. Set GEMINI_API_KEY in .env" });
 
@@ -1330,21 +1521,17 @@ Return ONLY a valid JSON array:
 [
   {
     "text": "quote text",
-    "author": "Speaker/Author",
+    "author": "Speaker/Author (if identifiable from the text, else empty string)",
     "category": "Category Name",
     "context": "Brief context",
-    "suggestedTags": ["tag1", "tag2"],
-    "source": "${source || "Pasted text"}"
+    "suggestedTags": ["tag1", "tag2"]
   }
 ]
 
 Extract 3-15 quotes. Return ONLY the JSON array.`;
 
     const response  = await generateWithFallback(prompt, { temperature: 0.2, responseMimeType: "application/json" });
-    const raw       = response.text?.trim() || "[]";
-    const jsonStr   = raw.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
-    const extracted = JSON.parse(jsonStr);
-    if (!Array.isArray(extracted)) return res.status(500).json({ error: "AI returned unexpected format" });
+    const extracted = extractJsonArray(response.text || "[]");
     res.json({ ok: true, quotes: extracted, count: extracted.length });
   } catch (error: any) {
     console.error("Text extraction error:", error);
@@ -1399,6 +1586,167 @@ app.get("/api/quotes/:quoteId/insights", async (req, res) => {
   }
 });
 
+// ── Anatomy (admin-curated deep context) ──────────────────────────────────────
+
+const ANATOMY_SECTIONS = ["context", "makers", "discussions", "relevance", "evolution", "further_reading"] as const;
+type AnatomySectionKey = typeof ANATOMY_SECTIONS[number];
+
+// Per-section drafting instructions, used both for full generation and single-section regeneration.
+const ANATOMY_SECTION_PROMPTS: Record<AnatomySectionKey, string> = {
+  context:         "The real-world circumstances and background: when, where, and why the quote was first said or written, and what was happening around it.",
+  makers:          "The makers and origin: who authored or voiced it, their background, and how the line came to be attributed, adapted, or popularised over time.",
+  discussions:     "Scholarly discussions: how philosophers, critics, and scholars across traditions interpret, support, or complicate the idea. Note key debates.",
+  relevance:       "Modern relevance: how the idea reads and applies in today's world — culture, work, technology, daily life.",
+  evolution:       "Evolution over time: how the phrasing and meaning of the idea have shifted across eras, cultures, and re-voicings.",
+  further_reading: "Further reading: a short curated list of books, essays, talks, or films that deepen the idea. Return each as a bullet line starting with '- ' (title — author/source, one-line why).",
+};
+
+// Robustly pull the first balanced JSON object from a model response (tolerates fences / trailing prose / citations).
+function extractJsonObject(raw: string): any {
+  const stripped = raw.trim().replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
+  const start = stripped.indexOf("{");
+  if (start === -1) return {};
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < stripped.length; i++) {
+    const ch = stripped[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') { inStr = true; continue; }
+    if (ch === "{") depth++;
+    else if (ch === "}" && --depth === 0) {
+      try { return JSON.parse(stripped.slice(start, i + 1)); }
+      catch { return {}; }
+    }
+  }
+  return {};
+}
+
+// Resolve a quote by id-or-slug across seed + runtime, mirroring the insights endpoint.
+async function resolveQuoteForAnatomy(quoteId: string) {
+  const allSeed  = getEnrichedQuotes();
+  const runtimeQ = await getRuntimeQuoteBySlug(quoteId);
+  return allSeed.find((q: any) => q.id === quoteId) ?? runtimeQ ?? null;
+}
+
+function anatomyQuoteContext(q: any): string {
+  return `Quote: "${q.text}"\nAttributed to: ${q.author}${q.source ? `\nSource: ${q.source}` : ""}${q.year ? `\nYear: ${q.year}` : ""}`;
+}
+
+// Public: enabled anatomy with only its enabled sections (visitors).
+app.get("/api/quotes/:quoteId/anatomy", async (req, res) => {
+  const row = await getAnatomy(req.params.quoteId);
+  if (!row || !row.enabled) return res.json({ enabled: false });
+  const all = row.data?.sections || {};
+  const sections: Record<string, { body: string }> = {};
+  for (const key of ANATOMY_SECTIONS) {
+    if (all[key]?.enabled && all[key]?.body?.trim()) sections[key] = { body: all[key].body };
+  }
+  res.json({ enabled: true, sections });
+});
+
+// Admin: full anatomy incl. disabled sections + flags, for the editor.
+app.get("/api/admin/quotes/:quoteId/anatomy", adminMiddleware, async (req, res) => {
+  const row = await getAnatomy(req.params.quoteId);
+  if (!row) return res.json({ exists: false });
+  res.json({ exists: true, enabled: row.enabled, sections: row.data?.sections || {} });
+});
+
+// Admin: generate all six sections from scratch (grounded), enable everything, persist.
+app.post("/api/admin/quotes/:quoteId/anatomy/generate", adminMiddleware, async (req, res) => {
+  if (!aiClient) return res.status(503).json({ error: "AI client not configured. Set GEMINI_API_KEY in .env" });
+  const quote = await resolveQuoteForAnatomy(req.params.quoteId);
+  if (!quote) return res.status(404).json({ error: "Quote not found" });
+
+  const sectionSpec = ANATOMY_SECTIONS.map(k => `"${k}": ${ANATOMY_SECTION_PROMPTS[k]}`).join("\n");
+  const prompt = `You are an editorial researcher writing a deep "anatomy" of a quote for a thoughtful general audience.
+
+${anatomyQuoteContext(quote)}
+
+Write six sections. Each value is 2-4 short paragraphs of grounded, accurate prose (you may use "- " bullet lines where a list fits). Be specific and factual; do not invent sources.
+
+Sections (key: what to cover):
+${sectionSpec}
+
+Return ONLY a JSON object with exactly these keys: ${ANATOMY_SECTIONS.join(", ")}. Each value is the section's prose as a single string.`;
+
+  try {
+    const response = await generateWithFallback(prompt, { tools: [{ googleSearch: {} }], temperature: 0.4 });
+    const parsed   = extractJsonObject(response.text || "{}");
+    const sections: Record<string, { body: string; enabled: boolean }> = {};
+    for (const key of ANATOMY_SECTIONS) {
+      sections[key] = { body: typeof parsed[key] === "string" ? parsed[key].trim() : "", enabled: true };
+    }
+    const data = { sections, model: "gemini", generatedAt: new Date().toISOString(), editedAt: new Date().toISOString() };
+    await upsertAnatomy(req.params.quoteId, data, true);
+    res.json({ enabled: true, sections });
+  } catch (err: any) {
+    console.error("[anatomy] generate error:", err.message);
+    res.status(500).json({ error: "Anatomy generation failed: " + err.message });
+  }
+});
+
+// Admin: regenerate a single section's prose — returns the draft WITHOUT saving.
+app.post("/api/admin/quotes/:quoteId/anatomy/regenerate-section", adminMiddleware, async (req, res) => {
+  if (!aiClient) return res.status(503).json({ error: "AI client not configured. Set GEMINI_API_KEY in .env" });
+  const section = req.body?.section as AnatomySectionKey;
+  if (!ANATOMY_SECTIONS.includes(section)) return res.status(400).json({ error: "Invalid section" });
+  const quote = await resolveQuoteForAnatomy(req.params.quoteId);
+  if (!quote) return res.status(404).json({ error: "Quote not found" });
+
+  const prompt = `You are an editorial researcher writing one section of a quote's deep "anatomy" for a thoughtful general audience.
+
+${anatomyQuoteContext(quote)}
+
+Write ONLY this section: ${ANATOMY_SECTION_PROMPTS[section]}
+
+Return 2-4 short paragraphs of grounded, accurate prose (you may use "- " bullet lines where a list fits). Do not invent sources. Return ONLY the prose — no headings, no JSON, no preamble.`;
+
+  try {
+    const response = await generateWithFallback(prompt, { tools: [{ googleSearch: {} }], temperature: 0.4 });
+    res.json({ body: (response.text || "").trim() });
+  } catch (err: any) {
+    console.error("[anatomy] regenerate error:", err.message);
+    res.status(500).json({ error: "Section regeneration failed: " + err.message });
+  }
+});
+
+// Admin: save the whole anatomy (Save All) — bodies + per-section flags + top-level enabled.
+const AnatomySectionSchema = z.object({ body: z.string().max(8000), enabled: z.boolean() });
+const AnatomySaveSchema = z.object({
+  enabled:  z.boolean(),
+  sections: z.record(z.enum(ANATOMY_SECTIONS), AnatomySectionSchema),
+});
+
+app.put("/api/admin/quotes/:quoteId/anatomy", adminMiddleware, async (req, res) => {
+  const parsed = AnatomySaveSchema.safeParse(req.body || {});
+  if (!parsed.success) return res.status(400).json({ error: "Invalid anatomy payload" });
+  const existing = await getAnatomy(req.params.quoteId);
+  const sections: Record<string, { body: string; enabled: boolean }> = {};
+  for (const key of ANATOMY_SECTIONS) {
+    const incoming = parsed.data.sections[key];
+    sections[key] = incoming
+      ? { body: incoming.body.trim(), enabled: incoming.enabled }
+      : (existing?.data?.sections?.[key] ?? { body: "", enabled: false });
+  }
+  const data = {
+    sections,
+    model:       existing?.data?.model ?? "gemini",
+    generatedAt: existing?.data?.generatedAt ?? new Date().toISOString(),
+    editedAt:    new Date().toISOString(),
+  };
+  await upsertAnatomy(req.params.quoteId, data, parsed.data.enabled);
+  res.json({ ok: true, enabled: parsed.data.enabled, sections });
+});
+
+// Public: ids of quotes that have an enabled anatomy — powers the "has anatomy" badge on cards.
+app.get("/api/anatomies/ids", async (_req, res) => {
+  res.json({ ids: await getAnatomyQuoteIds() });
+});
+
 // ── OG Image generation ───────────────────────────────────────────────────────
 const OG_W = 1200; const OG_H = 630;
 const OG_BG_DARK = "#0F1F10"; const OG_BG_CREAM = "#FBF9F6";
@@ -1429,13 +1777,8 @@ function ogFooter(ctx: any, dark: boolean) {
   const y = OG_H - 44;
   ctx.font = "bold 22px Arial, sans-serif";
   ctx.fillStyle = dark ? OG_ACCENT : OG_GREEN;
-  ctx.textAlign = "left"; ctx.textBaseline = "middle";
-  let x = 60;
-  for (const ch of "INVERTED COMMA") { ctx.fillText(ch, x, y); x += ctx.measureText(ch).width + 2.5; }
-  ctx.font = "17px Arial, sans-serif";
-  ctx.fillStyle = dark ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.3)";
-  ctx.textAlign = "right";
-  ctx.fillText("www.invertedcomma.com", OG_W - 60, y);
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("Deep Dive with Inverted Comma  ·  www.invertedcomma.com", OG_W / 2, y);
 }
 
 function ogGhost(ctx: any, dark: boolean) {
@@ -1571,8 +1914,6 @@ function buildQuoteOg(quote: { text: string; author: string; year?: number; tags
   const tagW = ctx.measureText(`#${tag}`).width + 32;
   ctx.fillStyle = OG_GREEN; ctx.beginPath(); ctx.roundRect(60, 52, tagW, 36, 18); ctx.fill();
   ctx.fillStyle = "#FFFFFF"; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(`#${tag}`, 76, 70);
-  ctx.font = "bold 13px Arial, sans-serif"; ctx.fillStyle = OG_STONE;
-  ctx.textAlign = "right"; ctx.fillText("DEEP DIVE", OG_W - 60, 70);
   const PAD = 60; const INNER = OG_W - PAD * 2;
   const rawText = quote.text.length > 200 ? quote.text.slice(0, 198) + "…" : quote.text;
   const { pt, lines } = ogFitText(ctx, `"${rawText}"`, INNER, 320);

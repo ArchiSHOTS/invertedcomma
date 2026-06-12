@@ -12,9 +12,11 @@ if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL environment variable is not set — add it to .env");
 }
 
+const isLocalDb = /localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL);
+
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  ssl: isLocalDb ? false : { rejectUnauthorized: false },
   max: 10,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 5_000,
@@ -49,6 +51,16 @@ export async function runMigrations() {
   // Backfill status for existing rows based on unsubscribed_at
   await pool.query(
     "UPDATE subscribers SET status='unsubscribed' WHERE unsubscribed_at IS NOT NULL AND status='subscribed'"
+  );
+  // Anatomy: detailed AI-drafted + human-edited deep context for select quotes.
+  await pool.query(
+    `CREATE TABLE IF NOT EXISTS anatomies (
+       quote_id   TEXT PRIMARY KEY,
+       data       JSONB   NOT NULL,
+       enabled    BOOLEAN NOT NULL DEFAULT true,
+       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+     )`
   );
   console.log("[db] Migrations applied ✓");
 }
@@ -242,11 +254,27 @@ export async function upsertAuthor(a: {
 // RUNTIME QUOTES
 // ─────────────────────────────────────────────────────────────────────────────
 
+// In-memory cache for the full runtime_quotes table. This table is read on
+// nearly every request (page views, social-preview crawlers, OG image
+// generation), so without a cache each one triggers a full-table SELECT
+// (including the potentially-large `enrichment` JSONB column). A short TTL
+// keeps reads cheap while staying close to real-time for admin edits.
+let runtimeQuotesCache: { rows: any[]; expiresAt: number } | null = null;
+const RUNTIME_QUOTES_CACHE_TTL_MS = 30_000;
+
+function invalidateRuntimeQuotesCache() {
+  runtimeQuotesCache = null;
+}
+
 export async function getRuntimeQuotes(status?: string) {
-  const { rows } = status
-    ? await pool.query("SELECT * FROM runtime_quotes WHERE status=$1 ORDER BY created_at DESC", [status])
-    : await pool.query("SELECT * FROM runtime_quotes ORDER BY created_at DESC");
-  return rows.map((r: any) => ({ ...r, tags: r.tags ?? [] }));
+  if (!runtimeQuotesCache || runtimeQuotesCache.expiresAt < Date.now()) {
+    const { rows } = await pool.query("SELECT * FROM runtime_quotes ORDER BY created_at DESC");
+    runtimeQuotesCache = {
+      rows: rows.map((r: any) => ({ ...r, tags: r.tags ?? [] })),
+      expiresAt: Date.now() + RUNTIME_QUOTES_CACHE_TTL_MS,
+    };
+  }
+  return status ? runtimeQuotesCache.rows.filter((r: any) => r.status === status) : runtimeQuotesCache.rows;
 }
 
 export async function getRuntimeQuoteBySlug(slug: string) {
@@ -265,6 +293,7 @@ export async function createRuntimeQuote(q: any) {
      q.year ?? null, q.category ?? null, q.context ?? null,
      q.tags ?? [], q.sourceType ?? "book", q.status ?? "pending", q.submittedBy ?? null]
   );
+  invalidateRuntimeQuotesCache();
   return rows[0];
 }
 
@@ -286,11 +315,37 @@ export async function updateRuntimeQuote(id: string, fields: any) {
   const { rows } = await pool.query(
     `UPDATE runtime_quotes SET ${sets.join(",")} WHERE id=$${i} OR slug=$${i} RETURNING *`, vals
   );
+  invalidateRuntimeQuotesCache();
   return rows[0] ?? null;
 }
 
 export async function deleteRuntimeQuote(id: string) {
   await pool.query("DELETE FROM runtime_quotes WHERE id=$1", [id]);
+  invalidateRuntimeQuotesCache();
+}
+
+/** Apply shared attributes (category, source, sourceUrl, year, extra tags) to many runtime quotes at once. */
+export async function bulkEditRuntimeQuotes(
+  ids: string[],
+  fields: { category?: string; source?: string; sourceUrl?: string; year?: number; addTags?: string[] }
+): Promise<number> {
+  if (!ids.length) return 0;
+  const { category, source, sourceUrl, year, addTags } = fields;
+  const { rowCount } = await pool.query(
+    `UPDATE runtime_quotes SET
+       category   = COALESCE($2, category),
+       source     = COALESCE($3, source),
+       source_url = COALESCE($4, source_url),
+       year       = COALESCE($6, year),
+       tags       = CASE WHEN $5::text[] IS NOT NULL
+                          THEN (SELECT ARRAY(SELECT DISTINCT unnest(tags || $5::text[])))
+                          ELSE tags END
+     WHERE id = ANY($1::text[])`,
+    [ids, category || null, source || null, sourceUrl || null, addTags && addTags.length ? addTags : null,
+     typeof year === "number" ? year : null]
+  );
+  invalidateRuntimeQuotesCache();
+  return rowCount ?? 0;
 }
 
 /** Set status on many runtime quotes in a single query (by id list or by current-status filter). */
@@ -307,6 +362,7 @@ export async function bulkSetRuntimeQuoteStatus(
   const { rowCount } = await pool.query(
     `UPDATE runtime_quotes SET status=$1 WHERE ${where.join(" AND ")}`, params
   );
+  invalidateRuntimeQuotesCache();
   return rowCount ?? 0;
 }
 
@@ -425,6 +481,46 @@ export async function setInsight(quoteId: string, data: object) {
      ON CONFLICT (quote_id) DO UPDATE SET data=EXCLUDED.data, created_at=now()`,
     [quoteId, JSON.stringify(data)]
   );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ANATOMY (admin-curated deep context per quote)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Cheap cached set of quote ids that have an enabled anatomy — drives the
+// "has anatomy" badge on cards everywhere without bloating quote payloads.
+let anatomyIdsCache: { ids: string[]; expiresAt: number } | null = null;
+const ANATOMY_IDS_CACHE_TTL_MS = 30_000;
+
+function invalidateAnatomyIdsCache() {
+  anatomyIdsCache = null;
+}
+
+export async function getAnatomy(quoteId: string) {
+  const { rows } = await pool.query(
+    "SELECT data, enabled FROM anatomies WHERE quote_id=$1", [quoteId]
+  );
+  return rows[0] ?? null;
+}
+
+export async function upsertAnatomy(quoteId: string, data: object, enabled: boolean) {
+  await pool.query(
+    `INSERT INTO anatomies (quote_id, data, enabled) VALUES ($1,$2,$3)
+     ON CONFLICT (quote_id) DO UPDATE SET data=EXCLUDED.data, enabled=EXCLUDED.enabled, updated_at=now()`,
+    [quoteId, JSON.stringify(data), enabled]
+  );
+  invalidateAnatomyIdsCache();
+}
+
+export async function getAnatomyQuoteIds(): Promise<string[]> {
+  if (!anatomyIdsCache || anatomyIdsCache.expiresAt < Date.now()) {
+    const { rows } = await pool.query("SELECT quote_id FROM anatomies WHERE enabled=true");
+    anatomyIdsCache = {
+      ids: rows.map((r: any) => r.quote_id),
+      expiresAt: Date.now() + ANATOMY_IDS_CACHE_TTL_MS,
+    };
+  }
+  return anatomyIdsCache.ids;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -19,9 +19,10 @@ export function AuthorLink({ name, className }: { name: string; className?: stri
 }
 import {
   Heart, Bookmark, Share2, MessageSquare,
-  Plus, Check, FolderClosed, BookOpen, ExternalLink,
+  Plus, Check, FolderClosed, BookOpen, ExternalLink, FileSearch,
 } from "lucide-react";
 import { Quote, CustomCollection } from "../types";
+import { useAnatomyIds } from "../hooks/useAnatomyIds";
 
 interface QuoteCardProps {
   key?: string;
@@ -55,6 +56,8 @@ export default function QuoteCard({
   const navigate = useNavigate();
   const location = useLocation();
   const { isLoggedIn } = useUser();
+  const anatomyIds = useAnatomyIds();
+  const hasAnatomy = anatomyIds.has(quote.id);
   const [likesCount, setLikesCount] = useState(quote.likes);
   const [hasLiked, setHasLiked] = useState(false);
   const [showFolderMenu, setShowFolderMenu] = useState(false);
@@ -134,12 +137,23 @@ export default function QuoteCard({
 
       {/* Category stripe */}
       <div className="flex items-center justify-between px-5 pt-5 pb-3">
-        <span
-          className="text-[9px] font-bold uppercase tracking-[0.18em] px-2.5 py-1 rounded-full"
-          style={{ background: `${BRAND}15`, color: BRAND }}
-        >
-          {quote.category}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span
+            className="text-[9px] font-bold uppercase tracking-[0.18em] px-2.5 py-1 rounded-full"
+            style={{ background: `${BRAND}15`, color: BRAND }}
+          >
+            {quote.category}
+          </span>
+          {hasAnatomy && (
+            <span
+              className="inline-flex items-center justify-center w-5 h-5 rounded-full"
+              style={{ background: `${BRAND}15`, color: BRAND }}
+              title="This quote has a detailed anatomy"
+            >
+              <FileSearch className="w-3 h-3" />
+            </span>
+          )}
+        </div>
         <button
           onClick={(e) => { e.stopPropagation(); handleLike(); }}
           className={`flex items-center gap-1 text-xs font-mono rounded-full px-2.5 py-1 transition-all ${

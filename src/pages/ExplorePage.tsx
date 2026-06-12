@@ -2,9 +2,10 @@ import React, { useState, useEffect, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   BookOpen, Film, Mic2, FileText, Newspaper, MessageCircle,
-  Feather, Hash, Search, X, RefreshCw, ChevronRight, Sparkles,
+  Feather, Hash, Search, X, RefreshCw, ChevronRight, Sparkles, FileSearch,
 } from "lucide-react";
 import { Quote, SourceType } from "../types";
+import { useAnatomyIds } from "../hooks/useAnatomyIds";
 import SiteHeader from "../components/SiteHeader";
 import SiteFooter from "../components/SiteFooter";
 
@@ -50,14 +51,21 @@ function SourceBadge({ type }: { type: SourceType }) {
 }
 
 // ── Quote card for the explore grid ────────────────────────────────────────
-function ExploreQuoteCard({ quote, onTagClick }: { quote: Quote; onTagClick: (t: string) => void }) {
+function ExploreQuoteCard({ quote, onTagClick, hasAnatomy }: { quote: Quote; onTagClick: (t: string) => void; hasAnatomy: boolean }) {
   return (
     <Link
       to={`/q/${quote.slug}`}
       className="group flex flex-col gap-3 bg-white rounded-2xl border border-stone-200 p-5 hover:shadow-md hover:border-stone-300 transition-all cursor-pointer"
     >
       <div className="flex items-start justify-between gap-2">
-        <SourceBadge type={quote.sourceType ?? "book"} />
+        <div className="flex items-center gap-1.5">
+          <SourceBadge type={quote.sourceType ?? "book"} />
+          {hasAnatomy && (
+            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[#3D5A3E]/10 text-[#3D5A3E]" title="This quote has a detailed anatomy">
+              <FileSearch className="w-3 h-3" />
+            </span>
+          )}
+        </div>
         {quote.year && (
           <span className="text-[10px] font-mono text-stone-400 flex-shrink-0">{quote.year < 0 ? `${Math.abs(quote.year)} BC` : quote.year}</span>
         )}
@@ -113,6 +121,7 @@ function CategoryChip({
 
 // ── Main page ───────────────────────────────────────────────────────────────
 export default function ExplorePage() {
+  const anatomyIds = useAnatomyIds();
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeSource, setActiveSource] = useState<SourceType | "all">("all");
@@ -351,6 +360,7 @@ export default function ExplorePage() {
                       key={q.id}
                       quote={q}
                       onTagClick={tag => setActiveTag(tag)}
+                      hasAnatomy={anatomyIds.has(q.id)}
                     />
                   ))}
                 </div>

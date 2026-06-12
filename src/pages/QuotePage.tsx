@@ -1,19 +1,33 @@
-import React, { useState, useEffect } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import React, { useState, useEffect, useRef, lazy, Suspense } from "react";
+import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
+import { motion, AnimatePresence } from "motion/react";
 import {
   ArrowLeft, Heart, Bookmark, Share2, MessageSquare,
-  BookOpen, Sparkles, Send, User, Shield, ExternalLink,
-  Check, Bot, Globe, ShoppingCart, RefreshCw,
+  BookOpen, Sparkles, Send, Shield, ExternalLink,
+  Bot, Globe, ShoppingCart, RefreshCw, FileSearch,
 } from "lucide-react";
 import { Quote, Comment } from "../types";
 import { getQuoteBySlug, getEnrichedQuotes } from "../data/quotes";
 import { useUser } from "../context/UserContext";
+import { useAnatomyIds } from "../hooks/useAnatomyIds";
 import SiteHeader from "../components/SiteHeader";
 import SiteFooter from "../components/SiteFooter";
 import ShareCardModal from "../components/ShareCardModal";
 import SEO from "../components/SEO";
 
 const BRAND = "#3D5A3E";
+
+// Anatomy is heavy (editor + reader); code-split it and mount only when its tab opens.
+const QuoteAnatomy = lazy(() => import("../components/QuoteAnatomy"));
+
+type TabKey = "context" | "deepdive" | "anatomy" | "discuss";
+
+// Horizontal slide variants for the swipeable tab pager (direction-aware).
+const panelVariants = {
+  enter:  (d: number) => ({ x: d > 0 ? 36 : -36, opacity: 0 }),
+  center: { x: 0, opacity: 1 },
+  exit:   (d: number) => ({ x: d > 0 ? -36 : 36, opacity: 0 }),
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function updateMeta(name: string, content: string) {
@@ -34,6 +48,10 @@ function amazonUrl(title: string, author: string, region: "com" | "in") {
   return `https://www.amazon.${region}/s?k=${q}&tag=${tag}`;
 }
 
+function authorHref(name: string) {
+  return `/author/${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 function getToken() { return localStorage.getItem("ic_token") ?? ""; }
 function authHeaders() {
@@ -43,7 +61,9 @@ function authHeaders() {
 export default function QuotePage() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, isLoggedIn, updateUser } = useUser();
+  const anatomyIds = useAnatomyIds();
 
   const [quote, setQuote] = useState<Quote | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
@@ -77,6 +97,11 @@ export default function QuotePage() {
   const [showShareModal, setShowShareModal] = useState(false);
   const [relatedQuotes, setRelatedQuotes] = useState<Quote[]>([]);
 
+  // Tabbed layout
+  const [activeTab, setActiveTab] = useState<TabKey>("context");
+  const [dir, setDir] = useState(1);
+  const tabBarRef = useRef<HTMLDivElement>(null);
+
   // ── Data loading ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!slug) return;
@@ -107,6 +132,12 @@ export default function QuotePage() {
         .catch(() => navigate("/", { replace: true }));
     }
   }, [slug]);
+
+  // Open the tab referenced by the URL hash (e.g. ControlPage's /q/:slug#anatomy).
+  useEffect(() => {
+    if (location.hash === "#anatomy") setActiveTab("anatomy");
+    else if (location.hash === "#discussion") setActiveTab("discuss");
+  }, [location.hash]);
 
   // Sync bookmark state from logged-in user's account
   useEffect(() => {
@@ -239,8 +270,13 @@ export default function QuotePage() {
   const handlePostComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!quote || !newCommentText.trim()) return;
-    const displayHandle = isLoggedIn && user ? user.handle : "anonymous";
-    const displayAvatar = isLoggedIn && user ? user.avatar : "https://ui-avatars.com/api/?name=Anon&background=888&color=fff&size=100";
+    // Posting requires an account — send guests to sign in, then back here.
+    if (!isLoggedIn || !user) {
+      navigate(`/auth/login?next=${encodeURIComponent(location.pathname)}`);
+      return;
+    }
+    const displayHandle = user.handle;
+    const displayAvatar = user.avatar;
     try {
       const res = await fetch(`/api/discussions/${quote.id}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -288,6 +324,13 @@ export default function QuotePage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const toggleLike = () => {
+    const next = !hasLiked;
+    setHasLiked(next);
+    setLocalLikes(c => c + (next ? 1 : -1));
+    if (next) { setLikeAnimating(true); setTimeout(() => setLikeAnimating(false), 600); }
+  };
+
   // ── Loading ───────────────────────────────────────────────────────────────
   if (!quote) {
     return (
@@ -307,6 +350,33 @@ export default function QuotePage() {
   const yearLabel = quote.year
     ? (quote.year < 0 ? `${Math.abs(quote.year)} BC` : String(quote.year))
     : null;
+
+  // ── Tabs ────────────────────────────────────────────────────────────────────
+  const canEditAnatomy = user?.role === "admin" || user?.role === "moderator";
+  const hasAnatomy = anatomyIds.has(quote.id);
+  const showContextTab = !!quote.context || quote.tags.length > 0 || !!coverImage;
+  const showAnatomyTab = canEditAnatomy || hasAnatomy;
+
+  const tabs: { key: TabKey; label: string; Icon: React.ElementType; badge?: number }[] = [
+    ...(showContextTab ? [{ key: "context" as TabKey, label: "Context", Icon: BookOpen }] : []),
+    { key: "deepdive", label: "Deep Dive", Icon: Sparkles },
+    ...(showAnatomyTab ? [{ key: "anatomy" as TabKey, label: "Anatomy", Icon: FileSearch }] : []),
+    { key: "discuss", label: "Discuss", Icon: MessageSquare, badge: comments.length || undefined },
+  ];
+  const order = tabs.map(t => t.key);
+  const effectiveTab: TabKey = order.includes(activeTab) ? activeTab : order[0];
+
+  const goToTab = (key: TabKey) => {
+    setDir(order.indexOf(key) >= order.indexOf(effectiveTab) ? 1 : -1);
+    setActiveTab(key);
+    requestAnimationFrame(() => tabBarRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
+
+  const swipeToNeighbour = (offsetX: number) => {
+    const i = order.indexOf(effectiveTab);
+    if (offsetX < -60 && i < order.length - 1) goToTab(order[i + 1]);
+    else if (offsetX > 60 && i > 0) goToTab(order[i - 1]);
+  };
 
   // ── Render ────────────────────────────────────────────────────────────────
   const ogImage = `https://www.invertedcomma.com/api/og/quote/${quote.slug}`;
@@ -335,83 +405,71 @@ export default function QuotePage() {
       <div className="min-h-screen bg-[#FBF9F6] flex flex-col">
         <SiteHeader />
 
-        <main className="flex-1 max-w-3xl mx-auto w-full px-4 md:px-6 py-8 md:py-12 space-y-10">
+        {/* ── Green hero ─────────────────────────────────────────────── */}
+        <section className="w-full bg-gradient-to-br from-[#0F1F10] via-[#1E3320] to-[#3D5A3E]">
+          <div className="max-w-3xl mx-auto w-full px-4 sm:px-6 py-10 sm:py-14">
+            {/* Breadcrumb */}
+            <div className="flex items-center gap-3 mb-7">
+              <Link
+                to="/"
+                className="inline-flex items-center gap-1.5 text-sm text-white/70 hover:text-white transition-colors"
+              >
+                <ArrowLeft className="w-4 h-4" /> Explore
+              </Link>
+              <span className="text-white/30">/</span>
+              <span className="text-[10px] font-bold uppercase tracking-[0.18em] px-2.5 py-1 rounded-full bg-white/15 text-white/90">
+                {quote.category}
+              </span>
+            </div>
 
-          {/* ── Breadcrumb ─────────────────────────────────────────────── */}
-          <div className="flex items-center gap-3">
-            <Link
-              to="/"
-              className="inline-flex items-center gap-1.5 text-sm text-stone-400 hover:text-stone-700 transition-colors"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              Explore
-            </Link>
-            <span className="text-stone-200">/</span>
-            <span
-              className="text-[10px] font-bold uppercase tracking-[0.18em] px-2.5 py-1 rounded-full"
-              style={{ background: `${BRAND}18`, color: BRAND }}
-            >
-              {quote.category}
-            </span>
-          </div>
-
-          {/* ── Hero quote ─────────────────────────────────────────────── */}
-          <section>
-            <div className="relative pl-6 border-l-4 mb-8" style={{ borderColor: BRAND }}>
+            {/* Quote */}
+            <div className="relative">
               <span
-                className="absolute -top-4 -left-3 font-serif leading-none select-none pointer-events-none"
-                style={{ fontSize: "5rem", color: `${BRAND}22` }}
+                className="absolute -top-6 -left-1 font-serif leading-none select-none pointer-events-none text-white/15"
+                style={{ fontSize: "5.5rem" }}
               >
                 &ldquo;
               </span>
-              <blockquote className="font-serif italic text-2xl sm:text-3xl md:text-4xl leading-tight text-stone-800 mb-5 relative z-10">
+              <blockquote className="font-serif italic text-2xl sm:text-3xl md:text-4xl lg:text-[2.75rem] leading-[1.15] text-stone-50 relative z-10">
                 {quote.text}
               </blockquote>
-              <cite className="not-italic block">
-                <span className="font-bold text-sm uppercase tracking-[0.18em] text-stone-700">
-                  — <a
-                    href={`/author/${quote.author.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`}
-                    className="hover:underline hover:text-stone-900 transition-colors"
-                  >{quote.author}</a>
-                </span>
-                {(quote.source || yearLabel) && (
-                  <span className="block font-serif italic text-sm text-stone-400 mt-0.5">
-                    {quote.source && (quote as any).sourceUrl ? (
-                      <a
-                        href={(quote as any).sourceUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="hover:text-stone-600 underline underline-offset-2 decoration-stone-300 transition-colors"
-                      >
-                        {quote.source}
-                      </a>
-                    ) : (
-                      quote.source
-                    )}
-                    {quote.source && yearLabel && ", "}
-                    {yearLabel}
-                  </span>
-                )}
-              </cite>
             </div>
 
+            {/* Attribution */}
+            <cite className="not-italic block mt-6">
+              <span className="font-bold text-sm uppercase tracking-[0.18em] text-white">
+                — <a href={authorHref(quote.author)} className="hover:underline">{quote.author}</a>
+              </span>
+              {(quote.source || yearLabel) && (
+                <span className="block font-serif italic text-sm text-white/60 mt-1">
+                  {quote.source && (quote as any).sourceUrl ? (
+                    <a
+                      href={(quote as any).sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hover:text-white/90 underline underline-offset-2 decoration-white/30 transition-colors"
+                    >
+                      {quote.source}
+                    </a>
+                  ) : (
+                    quote.source
+                  )}
+                  {quote.source && yearLabel && ", "}
+                  {yearLabel}
+                </span>
+              )}
+            </cite>
+
             {/* Action row */}
-            <div className="flex items-center flex-wrap gap-2">
+            <div className="flex items-center flex-wrap gap-2 mt-8">
               <button
-                onClick={() => {
-                  const next = !hasLiked;
-                  setHasLiked(next);
-                  setLocalLikes(c => c + (next ? 1 : -1));
-                  if (next) { setLikeAnimating(true); setTimeout(() => setLikeAnimating(false), 600); }
-                }}
+                onClick={toggleLike}
                 className={`flex items-center gap-2 h-10 px-4 rounded-full text-sm font-medium border transition-all ${
-                  hasLiked
-                    ? "bg-rose-500 border-rose-500 text-white"
-                    : "border-stone-200 text-stone-500 hover:border-stone-400"
+                  hasLiked ? "bg-white text-rose-600 border-white" : "border-white/30 text-white hover:bg-white/10"
                 }`}
               >
                 <Heart
-                  className={`w-4 h-4 transition-transform ${hasLiked ? "fill-white" : ""} ${likeAnimating ? "scale-150" : "scale-100"}`}
+                  className={`w-4 h-4 transition-transform ${hasLiked ? "fill-rose-600" : ""} ${likeAnimating ? "scale-150" : "scale-100"}`}
                   style={{ transitionDuration: "150ms" }}
                 />
                 {localLikes.toLocaleString()}
@@ -420,484 +478,487 @@ export default function QuotePage() {
               <button
                 onClick={handleBookmark}
                 className={`flex items-center gap-2 h-10 px-4 rounded-full text-sm font-medium border transition-all ${
-                  isBookmarked ? "text-white border-stone-800" : "border-stone-200 text-stone-500 hover:border-stone-400"
+                  isBookmarked ? "bg-white text-[#3D5A3E] border-white" : "border-white/30 text-white hover:bg-white/10"
                 }`}
-                style={isBookmarked ? { background: BRAND, borderColor: BRAND } : {}}
               >
-                <Bookmark className={`w-4 h-4 ${isBookmarked ? "fill-white" : ""}`} />
+                <Bookmark className={`w-4 h-4 ${isBookmarked ? "fill-[#3D5A3E]" : ""}`} />
                 <span className="hidden sm:inline">{isBookmarked ? "Saved" : "Save"}</span>
               </button>
 
               <button
                 onClick={() => setShowShareModal(true)}
-                className="flex items-center gap-2 h-10 px-4 rounded-full text-sm font-semibold text-white border transition-all hover:opacity-90"
-                style={{ background: BRAND, borderColor: BRAND }}
+                className="flex items-center gap-2 h-10 px-4 rounded-full text-sm font-semibold bg-white text-[#3D5A3E] border border-white transition-all hover:bg-white/90"
               >
                 <Share2 className="w-4 h-4" />
-                Share
+                {copied ? "Copied" : "Share"}
               </button>
-
-              <a
-                href="#discussion"
-                className="ml-auto flex items-center gap-2 h-10 px-4 rounded-full text-sm font-medium border border-stone-200 text-stone-500 hover:border-stone-400 transition-all"
-              >
-                <MessageSquare className="w-4 h-4" />
-                {comments.length > 0 && <span>{comments.length}</span>}
-                <span className="hidden sm:inline">Discuss</span>
-              </a>
             </div>
-          </section>
+          </div>
+        </section>
 
-          {/* ── Cover image ────────────────────────────────────────────── */}
-          {coverImage && (
-            <section className="flex gap-5 items-start">
-              <div className="flex-shrink-0">
-                <img
-                  src={coverImage.url}
-                  alt={quote.source || "Source cover"}
-                  className="w-24 sm:w-32 rounded-xl shadow-md object-cover border border-stone-200"
-                  onError={() => setCoverImage(null)}
-                />
-                <p className="text-[9px] text-stone-300 mt-1 text-center leading-tight">{coverImage.credit}</p>
-              </div>
-              {quote.source && (
-                <div className="pt-1">
-                  <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-stone-400 mb-1">
-                    {(quote as any).sourceType === "movie" ? "Film" : "From the book"}
-                  </p>
-                  <p className="font-semibold text-stone-800 text-sm">{quote.source}</p>
-                  {(quote as any).sourceUrl && (
-                    <a
-                      href={(quote as any).sourceUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 mt-1.5 text-[11px] text-stone-400 hover:text-stone-700 transition-colors"
-                    >
-                      <ExternalLink className="w-3 h-3" /> View source
-                    </a>
+        {/* ── Sticky tab bar ─────────────────────────────────────────── */}
+        <div
+          ref={tabBarRef}
+          className="sticky top-16 z-30 bg-[#FBF9F6]/95 backdrop-blur border-b border-stone-200 scroll-mt-16"
+        >
+          <div className="max-w-3xl mx-auto w-full px-4 sm:px-6">
+            <div
+              className="flex gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden"
+              style={{ scrollbarWidth: "none" }}
+              role="tablist"
+            >
+              {tabs.map((t) => {
+                const active = t.key === effectiveTab;
+                return (
+                  <button
+                    key={t.key}
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => goToTab(t.key)}
+                    className={`relative flex items-center gap-1.5 whitespace-nowrap px-4 h-12 text-sm font-semibold transition-colors ${
+                      active ? "text-[#3D5A3E]" : "text-stone-400 hover:text-stone-600"
+                    }`}
+                  >
+                    <t.Icon className="w-3.5 h-3.5" />
+                    {t.label}
+                    {t.badge ? (
+                      <span className="text-[10px] font-mono text-stone-400">{t.badge}</span>
+                    ) : null}
+                    {active && (
+                      <span className="absolute left-2 right-2 bottom-0 h-0.5 rounded-full" style={{ background: BRAND }} />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Pager ──────────────────────────────────────────────────── */}
+        <main className="flex-1 max-w-3xl mx-auto w-full px-4 sm:px-6 py-8">
+          <AnimatePresence mode="wait" custom={dir} initial={false}>
+            <motion.div
+              key={effectiveTab}
+              custom={dir}
+              variants={panelVariants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={{ duration: 0.18, ease: "easeOut" }}
+              drag="x"
+              dragConstraints={{ left: 0, right: 0 }}
+              dragElastic={0.18}
+              onDragEnd={(_, info) => swipeToNeighbour(info.offset.x)}
+              className="space-y-8 touch-pan-y"
+            >
+              {/* ── Context panel ── */}
+              {effectiveTab === "context" && (
+                <>
+                  {coverImage && (
+                    <section className="flex gap-5 items-start">
+                      <div className="flex-shrink-0">
+                        <img
+                          src={coverImage.url}
+                          alt={quote.source || "Source cover"}
+                          className="w-24 sm:w-32 rounded-xl shadow-md object-cover border border-stone-200"
+                          onError={() => setCoverImage(null)}
+                        />
+                        <p className="text-[9px] text-stone-300 mt-1 text-center leading-tight">{coverImage.credit}</p>
+                      </div>
+                      {quote.source && (
+                        <div className="pt-1">
+                          <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-stone-400 mb-1">
+                            {(quote as any).sourceType === "movie" ? "Film" : "From the book"}
+                          </p>
+                          <p className="font-semibold text-stone-800 text-sm">{quote.source}</p>
+                          {(quote as any).sourceUrl && (
+                            <a
+                              href={(quote as any).sourceUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 mt-1.5 text-[11px] text-stone-400 hover:text-stone-700 transition-colors"
+                            >
+                              <ExternalLink className="w-3 h-3" /> View source
+                            </a>
+                          )}
+                        </div>
+                      )}
+                    </section>
                   )}
+
+                  {quote.context && (
+                    <section className="bg-white rounded-2xl border border-stone-200 p-6">
+                      <div className="flex items-center justify-between mb-3">
+                        <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-stone-400">Context</h2>
+                        <span className="text-[9px] font-mono uppercase tracking-widest bg-stone-100 text-stone-400 px-2 py-0.5 rounded-full">
+                          AI generated
+                        </span>
+                      </div>
+                      <p className="font-serif text-stone-600 leading-relaxed text-[0.95rem]">{quote.context}</p>
+                    </section>
+                  )}
+
+                  {quote.tags.length > 0 && (
+                    <section>
+                      <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-stone-400 mb-3">Topics</h2>
+                      <div className="flex flex-wrap gap-2">
+                        {quote.tags.map((tag) => (
+                          <Link
+                            key={tag}
+                            to={`/tag/${tag}`}
+                            className="inline-flex items-center h-8 px-4 rounded-full text-xs font-medium border border-stone-200 text-stone-500 hover:text-white hover:border-transparent transition-all"
+                            onMouseEnter={(e) => { e.currentTarget.style.background = BRAND; e.currentTarget.style.borderColor = BRAND; e.currentTarget.style.color = "white"; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = ""; e.currentTarget.style.borderColor = ""; e.currentTarget.style.color = ""; }}
+                          >
+                            #{tag}
+                          </Link>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+                </>
+              )}
+
+              {/* ── Deep Dive panel ── */}
+              {effectiveTab === "deepdive" && (
+                <>
+                  <section className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
+                    <div className="flex items-center justify-between px-6 py-4 border-b border-stone-100">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: `${BRAND}18` }}>
+                          <Sparkles className="w-3.5 h-3.5" style={{ color: BRAND }} />
+                        </div>
+                        <h2 className="text-sm font-semibold text-stone-700">Deep Dive</h2>
+                      </div>
+                      <span className="text-[9px] font-mono uppercase tracking-widest bg-stone-100 text-stone-400 px-2 py-0.5 rounded-full">
+                        AI generated
+                      </span>
+                    </div>
+
+                    {isLoadingInsights ? (
+                      <div className="p-6 space-y-5 animate-pulse">
+                        <div className="space-y-2">
+                          <div className="h-2 bg-stone-100 rounded w-28" />
+                          <div className="h-3 bg-stone-100 rounded w-full" />
+                          <div className="h-3 bg-stone-100 rounded w-5/6" />
+                        </div>
+                        <div className="space-y-2">
+                          <div className="h-2 bg-stone-100 rounded w-32" />
+                          <div className="h-3 bg-stone-100 rounded w-full" />
+                          <div className="h-3 bg-stone-100 rounded w-4/5" />
+                          <div className="h-3 bg-stone-100 rounded w-full" />
+                        </div>
+                      </div>
+                    ) : insights?.authorBio ? (
+                      <div className="divide-y divide-stone-100">
+                        {insights.quoteMeaning && (
+                          <div className="px-6 py-5 space-y-2">
+                            <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-stone-400">What this quote means</p>
+                            <p className="text-stone-700 leading-relaxed text-sm font-serif italic">{insights.quoteMeaning}</p>
+                          </div>
+                        )}
+
+                        <div className="px-6 py-5 space-y-2">
+                          <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-stone-400">About {quote.author}</p>
+                          <p className="text-stone-600 leading-relaxed text-sm">{insights.authorBio}</p>
+                        </div>
+
+                        {insights.historicalContext && (
+                          <div className="px-6 py-5 space-y-2">
+                            <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-stone-400">Historical context</p>
+                            <p className="text-stone-600 leading-relaxed text-sm">{insights.historicalContext}</p>
+                          </div>
+                        )}
+
+                        {insights.relatedWorks?.length > 0 && (
+                          <div className="px-6 py-5 space-y-3">
+                            <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-stone-400">Further reading</p>
+                            <div className="space-y-3">
+                              {insights.relatedWorks.map((work, i) => (
+                                <div key={i} className="flex gap-3">
+                                  <div className="w-7 h-7 rounded-lg bg-stone-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                                    <BookOpen className="w-3.5 h-3.5 text-stone-400" />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-semibold text-stone-800 leading-snug">
+                                      {work.title}
+                                      {work.author && work.author !== quote.author && (
+                                        <span className="font-normal text-stone-400"> · {work.author}</span>
+                                      )}
+                                    </p>
+                                    {work.description && (
+                                      <p className="text-[11px] text-stone-500 leading-relaxed mt-0.5">{work.description}</p>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {insights.webReferences?.length > 0 && (
+                          <div className="px-6 py-5 space-y-3">
+                            <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-stone-400">Sources & references</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {insights.webReferences.map((ref, i) => (
+                                <a
+                                  key={i}
+                                  href={ref.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title={ref.title}
+                                  className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full bg-stone-100 hover:bg-stone-200 text-[10px] text-stone-500 hover:text-stone-700 transition-colors max-w-[240px]"
+                                >
+                                  <Globe className="w-2.5 h-2.5 flex-shrink-0 text-stone-400" />
+                                  <span className="truncate">{ref.title}</span>
+                                  <ExternalLink className="w-2 h-2 flex-shrink-0 text-stone-300" />
+                                </a>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="px-6 py-10 flex flex-col items-center gap-3">
+                        <div className="flex gap-1.5">
+                          {[0, 1, 2].map(i => (
+                            <div
+                              key={i}
+                              className="w-1.5 h-1.5 rounded-full bg-stone-300"
+                              style={{ animation: `pulse 1.4s ease-in-out ${i * 0.2}s infinite` }}
+                            />
+                          ))}
+                        </div>
+                        <p className="text-sm text-stone-400">Preparing your deep dive…</p>
+                        <p className="text-[11px] text-stone-300">This appears automatically once ready.</p>
+                      </div>
+                    )}
+                  </section>
+
+                  {/* Web Counterpoint */}
+                  <section className="bg-white rounded-2xl border border-stone-200 p-6 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: `${BRAND}18` }}>
+                          <Bot className="w-3.5 h-3.5" style={{ color: BRAND }} />
+                        </div>
+                        <h2 className="text-sm font-semibold text-stone-700">Web Counterpoint</h2>
+                      </div>
+                      <span className="text-[9px] font-mono uppercase tracking-widest bg-stone-100 text-stone-400 px-2 py-0.5 rounded-full">
+                        AI generated
+                      </span>
+                    </div>
+
+                    {isGeneratingAi && !aiCounterpoint ? (
+                      <div className="space-y-3 animate-pulse">
+                        <div className="h-3 bg-stone-100 rounded w-full" />
+                        <div className="h-3 bg-stone-100 rounded w-11/12" />
+                        <div className="h-3 bg-stone-100 rounded w-4/5" />
+                      </div>
+                    ) : aiCounterpoint ? (
+                      <>
+                        <blockquote
+                          className="font-serif italic text-stone-600 leading-relaxed text-[0.95rem] pl-4 border-l-2"
+                          style={{ borderColor: BRAND }}
+                        >
+                          &ldquo;{aiCounterpoint}&rdquo;
+                        </blockquote>
+                        <p className="text-[10px] font-mono text-stone-400">— The Dialectic Engine</p>
+
+                        {aiSources.length > 0 && (
+                          <div className="pt-1 space-y-1.5">
+                            <p className="text-[9px] font-bold uppercase tracking-widest text-stone-400">Sources</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {aiSources.map((s, i) => (
+                                <a
+                                  key={i}
+                                  href={s.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title={s.title}
+                                  className="inline-flex items-center gap-1 h-6 px-2.5 rounded-full bg-stone-100 hover:bg-stone-200 text-[10px] text-stone-500 hover:text-stone-700 transition-colors max-w-[200px]"
+                                >
+                                  <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
+                                  <span className="truncate">{s.title}</span>
+                                </a>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="text-center py-6 space-y-3">
+                        <p className="text-sm text-stone-400 leading-relaxed">
+                          Search the web for real critiques and counterarguments to this idea.
+                        </p>
+                        <button
+                          onClick={() => quote && generateCounterpoint(quote.id, quote.text, quote.author)}
+                          disabled={isGeneratingAi}
+                          className="inline-flex items-center gap-2 h-10 px-6 rounded-full text-sm font-semibold text-white transition-all disabled:opacity-50 hover:opacity-90"
+                          style={{ background: BRAND }}
+                        >
+                          {isGeneratingAi ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                          {isGeneratingAi ? "Searching…" : "Find Counterpoint"}
+                        </button>
+                        {counterpointError && (
+                          <p className="text-xs text-red-400">{counterpointError}</p>
+                        )}
+                      </div>
+                    )}
+                  </section>
+
+                  {/* Further Reading & Resources */}
+                  {quote.relatedBooks && quote.relatedBooks.length > 0 && (
+                    <section className="space-y-4">
+                      <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-stone-400">
+                        Further reading &amp; resources
+                      </h2>
+
+                      <div className="space-y-3">
+                        {quote.relatedBooks.map((book) => (
+                          <div key={book.title} className="flex items-start gap-4 p-4 bg-white rounded-2xl border border-stone-200">
+                            <div className="w-9 h-12 rounded-md flex-shrink-0 flex items-center justify-center" style={{ background: `${BRAND}18` }}>
+                              <BookOpen className="w-4 h-4" style={{ color: BRAND }} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-serif font-semibold text-sm text-stone-800 leading-tight mb-0.5">{book.title}</p>
+                              <p className="text-[11px] text-stone-400 mb-2">{book.author}</p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {book.affiliateUrl && (
+                                  <a href={book.affiliateUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 h-6 px-2.5 rounded-full bg-stone-100 hover:bg-stone-200 text-[10px] text-stone-500 transition-colors">
+                                    <BookOpen className="w-2.5 h-2.5" /> Bookshop.org
+                                  </a>
+                                )}
+                                <a href={amazonUrl(book.title, book.author, "com")} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 h-6 px-2.5 rounded-full bg-orange-50 hover:bg-orange-100 text-[10px] text-orange-600 transition-colors">
+                                  <ShoppingCart className="w-2.5 h-2.5" /> Amazon.com
+                                </a>
+                                <a href={amazonUrl(book.title, book.author, "in")} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 h-6 px-2.5 rounded-full bg-orange-50 hover:bg-orange-100 text-[10px] text-orange-600 transition-colors">
+                                  <ShoppingCart className="w-2.5 h-2.5" /> Amazon.in
+                                </a>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="rounded-2xl border border-dashed border-stone-300 bg-stone-50 p-5 text-center space-y-1">
+                        <p className="text-[9px] font-mono uppercase tracking-widest text-stone-400">Advertisement</p>
+                        <p className="text-xs text-stone-400">
+                          Partner with Inverted Comma — reach curious minds.{" "}
+                          <a href="mailto:hello@invertedcomma.com" className="underline hover:text-stone-600 transition-colors">hello@invertedcomma.com</a>
+                        </p>
+                      </div>
+
+                      <p className="text-[9px] text-stone-400 font-mono">
+                        Bookshop.org links support independent bookshops. Amazon links may contain affiliate tags.
+                      </p>
+                    </section>
+                  )}
+                </>
+              )}
+
+              {/* ── Anatomy panel ── */}
+              {effectiveTab === "anatomy" && (
+                <div id="anatomy" className="scroll-mt-24">
+                  <Suspense fallback={<div className="py-16 text-center text-sm text-stone-400">Loading anatomy…</div>}>
+                    <QuoteAnatomy quoteId={quote.id} slug={slug} />
+                  </Suspense>
                 </div>
               )}
-            </section>
-          )}
 
-          {/* ── Context ────────────────────────────────────────────────── */}
-          {quote.context && (
-            <section className="bg-white rounded-2xl border border-stone-200 p-6">
-              <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-stone-400 mb-3">
-                Context
-              </h2>
-              <p className="font-serif text-stone-600 leading-relaxed text-[0.95rem]">
-                {quote.context}
-              </p>
-            </section>
-          )}
-
-          {/* ── Topics ─────────────────────────────────────────────────── */}
-          {quote.tags.length > 0 && (
-            <section>
-              <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-stone-400 mb-3">
-                Topics
-              </h2>
-              <div className="flex flex-wrap gap-2">
-                {quote.tags.map((tag) => (
-                  <Link
-                    key={tag}
-                    to={`/tag/${tag}`}
-                    className="inline-flex items-center h-8 px-4 rounded-full text-xs font-medium border border-stone-200 text-stone-500 hover:text-white hover:border-transparent transition-all"
-                    onMouseEnter={(e) => { e.currentTarget.style.background = BRAND; e.currentTarget.style.borderColor = BRAND; e.currentTarget.style.color = "white"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = ""; e.currentTarget.style.borderColor = ""; e.currentTarget.style.color = ""; }}
-                  >
-                    #{tag}
-                  </Link>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* ── Deep Dive ───────────────────────────────────────────────── */}
-          <section className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-stone-100">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: `${BRAND}18` }}>
-                  <Sparkles className="w-3.5 h-3.5" style={{ color: BRAND }} />
-                </div>
-                <h2 className="text-sm font-semibold text-stone-700">Deep Dive</h2>
-              </div>
-              <span className="text-[9px] font-mono uppercase tracking-widest bg-stone-100 text-stone-400 px-2 py-0.5 rounded-full">
-                AI generated
-              </span>
-            </div>
-
-            {isLoadingInsights ? (
-              <div className="p-6 space-y-5 animate-pulse">
-                <div className="space-y-2">
-                  <div className="h-2 bg-stone-100 rounded w-28" />
-                  <div className="h-3 bg-stone-100 rounded w-full" />
-                  <div className="h-3 bg-stone-100 rounded w-5/6" />
-                </div>
-                <div className="space-y-2">
-                  <div className="h-2 bg-stone-100 rounded w-32" />
-                  <div className="h-3 bg-stone-100 rounded w-full" />
-                  <div className="h-3 bg-stone-100 rounded w-4/5" />
-                  <div className="h-3 bg-stone-100 rounded w-full" />
-                </div>
-              </div>
-            ) : insights?.authorBio ? (
-              <div className="divide-y divide-stone-100">
-
-                {/* What this quote means */}
-                {insights.quoteMeaning && (
-                  <div className="px-6 py-5 space-y-2">
-                    <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-stone-400">What this quote means</p>
-                    <p className="text-stone-700 leading-relaxed text-sm font-serif italic">{insights.quoteMeaning}</p>
-                  </div>
-                )}
-
-                {/* About the author */}
-                <div className="px-6 py-5 space-y-2">
-                  <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-stone-400">About {quote?.author}</p>
-                  <p className="text-stone-600 leading-relaxed text-sm">{insights.authorBio}</p>
-                </div>
-
-                {/* Historical context */}
-                {insights.historicalContext && (
-                  <div className="px-6 py-5 space-y-2">
-                    <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-stone-400">Historical context</p>
-                    <p className="text-stone-600 leading-relaxed text-sm">{insights.historicalContext}</p>
-                  </div>
-                )}
-
-                {/* Related works */}
-                {insights.relatedWorks?.length > 0 && (
-                  <div className="px-6 py-5 space-y-3">
-                    <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-stone-400">Further reading</p>
+              {/* ── Discuss panel ── */}
+              {effectiveTab === "discuss" && (
+                <section id="discussion" className="space-y-6">
+                  {isLoadingComments ? (
                     <div className="space-y-3">
-                      {insights.relatedWorks.map((work, i) => (
-                        <div key={i} className="flex gap-3">
-                          <div className="w-7 h-7 rounded-lg bg-stone-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                            <BookOpen className="w-3.5 h-3.5 text-stone-400" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-xs font-semibold text-stone-800 leading-snug">
-                              {work.title}
-                              {work.author && work.author !== quote?.author && (
-                                <span className="font-normal text-stone-400"> · {work.author}</span>
+                      {[1, 2].map((i) => (
+                        <div key={i} className="h-16 bg-stone-100 rounded-xl animate-pulse" />
+                      ))}
+                    </div>
+                  ) : comments.length === 0 ? null : (
+                    <div className="space-y-4">
+                      {comments.map((comment) => (
+                        <div key={comment.id} className="flex gap-3 items-start bg-white rounded-2xl border border-stone-200 p-4">
+                          <img
+                            src={comment.avatar}
+                            alt={comment.username}
+                            className="w-8 h-8 rounded-full border border-stone-200 object-cover flex-shrink-0 mt-0.5"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <span className="font-semibold text-xs text-stone-800">{comment.username}</span>
+                              {comment.isAdmin && (
+                                <span className="flex items-center gap-0.5 text-[9px] font-bold uppercase bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded-full">
+                                  <Shield className="w-2 h-2" /> admin
+                                </span>
                               )}
+                              {comment.isCounterpoint && (
+                                <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full" style={{ background: `${BRAND}18`, color: BRAND }}>
+                                  counterpoint
+                                </span>
+                              )}
+                              <span className="ml-auto text-[10px] text-stone-400 font-mono">{comment.createdAt}</span>
+                            </div>
+                            <p className={`text-sm leading-relaxed ${comment.isCounterpoint ? "font-serif italic text-stone-600" : "text-stone-600"}`}>
+                              {comment.text}
                             </p>
-                            {work.description && (
-                              <p className="text-[11px] text-stone-500 leading-relaxed mt-0.5">{work.description}</p>
-                            )}
                           </div>
                         </div>
                       ))}
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {/* Web references */}
-                {insights.webReferences?.length > 0 && (
-                  <div className="px-6 py-5 space-y-3">
-                    <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-stone-400">Sources & references</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {insights.webReferences.map((ref, i) => (
-                        <a
-                          key={i}
-                          href={ref.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title={ref.title}
-                          className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full bg-stone-100 hover:bg-stone-200 text-[10px] text-stone-500 hover:text-stone-700 transition-colors max-w-[240px]"
-                        >
-                          <Globe className="w-2.5 h-2.5 flex-shrink-0 text-stone-400" />
-                          <span className="truncate">{ref.title}</span>
-                          <ExternalLink className="w-2 h-2 flex-shrink-0 text-stone-300" />
-                        </a>
-                      ))}
+                  {/* Comment form */}
+                  <form onSubmit={handlePostComment} className="bg-white rounded-2xl border border-stone-200 p-5 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-stone-700">Add your voice</h3>
+                      {isLoggedIn && user && (
+                        <div className="flex items-center gap-2">
+                          <img src={user.avatar} alt={user.name} className="w-6 h-6 rounded-full object-cover border border-stone-200" />
+                          <span className="text-xs font-medium text-stone-600">@{user.handle}</span>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                )}
 
-              </div>
-            ) : (
-              <div className="px-6 py-10 flex flex-col items-center gap-3">
-                <div className="flex gap-1.5">
-                  {[0, 1, 2].map(i => (
-                    <div
-                      key={i}
-                      className="w-1.5 h-1.5 rounded-full bg-stone-300"
-                      style={{ animation: `pulse 1.4s ease-in-out ${i * 0.2}s infinite` }}
+                    <textarea
+                      rows={3}
+                      placeholder="Challenge, agree, or add nuance…"
+                      value={newCommentText}
+                      onChange={(e) => setNewCommentText(e.target.value)}
+                      className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:border-transparent transition-all resize-none"
+                      style={{ ["--tw-ring-color" as string]: `${BRAND}40` }}
                     />
-                  ))}
-                </div>
-                <p className="text-sm text-stone-400">Preparing your deep dive…</p>
-                <p className="text-[11px] text-stone-300">This appears automatically once ready.</p>
-              </div>
-            )}
-          </section>
 
-          {/* ── Web Counterpoint ────────────────────────────────────────── */}
-          <section className="bg-white rounded-2xl border border-stone-200 p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: `${BRAND}18` }}>
-                  <Bot className="w-3.5 h-3.5" style={{ color: BRAND }} />
-                </div>
-                <h2 className="text-sm font-semibold text-stone-700">Web Counterpoint</h2>
-              </div>
-              <span className="text-[9px] font-mono uppercase tracking-widest bg-stone-100 text-stone-400 px-2 py-0.5 rounded-full">
-                AI generated
-              </span>
-            </div>
+                    <div className="flex items-center justify-between">
+                      <label className="flex items-center gap-2 text-xs text-stone-500 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={isCounterpoint}
+                          onChange={(e) => setIsCounterpoint(e.target.checked)}
+                          className="w-3.5 h-3.5 rounded"
+                        />
+                        Mark as counterpoint
+                      </label>
 
-            {isGeneratingAi && !aiCounterpoint ? (
-              <div className="space-y-3 animate-pulse">
-                <div className="h-3 bg-stone-100 rounded w-full" />
-                <div className="h-3 bg-stone-100 rounded w-11/12" />
-                <div className="h-3 bg-stone-100 rounded w-4/5" />
-              </div>
-            ) : aiCounterpoint ? (
-              <>
-                <blockquote
-                  className="font-serif italic text-stone-600 leading-relaxed text-[0.95rem] pl-4 border-l-2"
-                  style={{ borderColor: BRAND }}
-                >
-                  &ldquo;{aiCounterpoint}&rdquo;
-                </blockquote>
-                <p className="text-[10px] font-mono text-stone-400">— The Dialectic Engine</p>
-
-                {aiSources.length > 0 && (
-                  <div className="pt-1 space-y-1.5">
-                    <p className="text-[9px] font-bold uppercase tracking-widest text-stone-400">Sources</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {aiSources.map((s, i) => (
-                        <a
-                          key={i}
-                          href={s.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title={s.title}
-                          className="inline-flex items-center gap-1 h-6 px-2.5 rounded-full bg-stone-100 hover:bg-stone-200 text-[10px] text-stone-500 hover:text-stone-700 transition-colors max-w-[200px]"
-                        >
-                          <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
-                          <span className="truncate">{s.title}</span>
-                        </a>
-                      ))}
+                      <button
+                        type="submit"
+                        disabled={!newCommentText.trim()}
+                        className="flex items-center gap-2 h-9 px-5 rounded-full text-sm font-semibold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90"
+                        style={{ background: BRAND }}
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        Post
+                      </button>
                     </div>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="text-center py-6 space-y-3">
-                <p className="text-sm text-stone-400 leading-relaxed">
-                  Search the web for real critiques and counterarguments to this idea.
-                </p>
-                <button
-                  onClick={() => quote && generateCounterpoint(quote.id, quote.text, quote.author)}
-                  disabled={isGeneratingAi}
-                  className="inline-flex items-center gap-2 h-10 px-6 rounded-full text-sm font-semibold text-white transition-all disabled:opacity-50 hover:opacity-90"
-                  style={{ background: BRAND }}
-                >
-                  {isGeneratingAi ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                  {isGeneratingAi ? "Searching…" : "Find Counterpoint"}
-                </button>
-                {counterpointError && (
-                  <p className="text-xs text-red-400">{counterpointError}</p>
-                )}
-              </div>
-            )}
-          </section>
-
-          {/* ── Further Reading & Resources ─────────────────────────────── */}
-          {quote.relatedBooks && quote.relatedBooks.length > 0 && (
-            <section className="space-y-4">
-              <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-stone-400">
-                Further reading &amp; resources
-              </h2>
-
-              <div className="space-y-3">
-                {quote.relatedBooks.map((book) => (
-                  <div
-                    key={book.title}
-                    className="flex items-start gap-4 p-4 bg-white rounded-2xl border border-stone-200"
-                  >
-                    <div
-                      className="w-9 h-12 rounded-md flex-shrink-0 flex items-center justify-center"
-                      style={{ background: `${BRAND}18` }}
-                    >
-                      <BookOpen className="w-4 h-4" style={{ color: BRAND }} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-serif font-semibold text-sm text-stone-800 leading-tight mb-0.5">
-                        {book.title}
-                      </p>
-                      <p className="text-[11px] text-stone-400 mb-2">{book.author}</p>
-                      {/* Buy links */}
-                      <div className="flex flex-wrap gap-1.5">
-                        {book.affiliateUrl && (
-                          <a
-                            href={book.affiliateUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 h-6 px-2.5 rounded-full bg-stone-100 hover:bg-stone-200 text-[10px] text-stone-500 transition-colors"
-                          >
-                            <BookOpen className="w-2.5 h-2.5" />
-                            Bookshop.org
-                          </a>
-                        )}
-                        <a
-                          href={amazonUrl(book.title, book.author, "com")}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 h-6 px-2.5 rounded-full bg-orange-50 hover:bg-orange-100 text-[10px] text-orange-600 transition-colors"
-                        >
-                          <ShoppingCart className="w-2.5 h-2.5" />
-                          Amazon.com
-                        </a>
-                        <a
-                          href={amazonUrl(book.title, book.author, "in")}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 h-6 px-2.5 rounded-full bg-orange-50 hover:bg-orange-100 text-[10px] text-orange-600 transition-colors"
-                        >
-                          <ShoppingCart className="w-2.5 h-2.5" />
-                          Amazon.in
-                        </a>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Ad placeholder */}
-              <div className="rounded-2xl border border-dashed border-stone-300 bg-stone-50 p-5 text-center space-y-1">
-                <p className="text-[9px] font-mono uppercase tracking-widest text-stone-400">Advertisement</p>
-                <p className="text-xs text-stone-400">
-                  Partner with Inverted Comma — reach curious minds.{" "}
-                  <a
-                    href="mailto:hello@invertedcomma.com"
-                    className="underline hover:text-stone-600 transition-colors"
-                  >
-                    hello@invertedcomma.com
-                  </a>
-                </p>
-              </div>
-
-              <p className="text-[9px] text-stone-400 font-mono">
-                Bookshop.org links support independent bookshops. Amazon links may contain affiliate tags.
-              </p>
-            </section>
-          )}
-
-          {/* ── Discussion ─────────────────────────────────────────────── */}
-          <section id="discussion" className="space-y-6">
-            <h2 className="font-semibold text-stone-700">
-              Discussion
-              {comments.length > 0 && (
-                <span className="ml-2 text-xs font-normal text-stone-400">({comments.length})</span>
+                  </form>
+                </section>
               )}
-            </h2>
+            </motion.div>
+          </AnimatePresence>
 
-            {isLoadingComments ? (
-              <div className="space-y-3">
-                {[1, 2].map((i) => (
-                  <div key={i} className="h-16 bg-stone-100 rounded-xl animate-pulse" />
-                ))}
-              </div>
-            ) : comments.length === 0 ? (
-              <div className="text-center py-12 bg-white rounded-2xl border border-stone-200">
-                <MessageSquare className="w-6 h-6 text-stone-300 mx-auto mb-2" />
-                <p className="text-sm text-stone-400 italic">Be the first to challenge this idea.</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {comments.map((comment) => (
-                  <div key={comment.id} className="flex gap-3 items-start bg-white rounded-2xl border border-stone-200 p-4">
-                    <img
-                      src={comment.avatar}
-                      alt={comment.username}
-                      className="w-8 h-8 rounded-full border border-stone-200 object-cover flex-shrink-0 mt-0.5"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <span className="font-semibold text-xs text-stone-800">{comment.username}</span>
-                        {comment.isAdmin && (
-                          <span className="flex items-center gap-0.5 text-[9px] font-bold uppercase bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded-full">
-                            <Shield className="w-2 h-2" /> admin
-                          </span>
-                        )}
-                        {comment.isCounterpoint && (
-                          <span
-                            className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full"
-                            style={{ background: `${BRAND}18`, color: BRAND }}
-                          >
-                            counterpoint
-                          </span>
-                        )}
-                        <span className="ml-auto text-[10px] text-stone-400 font-mono">{comment.createdAt}</span>
-                      </div>
-                      <p className={`text-sm leading-relaxed ${comment.isCounterpoint ? "font-serif italic text-stone-600" : "text-stone-600"}`}>
-                        {comment.text}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Comment form */}
-            <form onSubmit={handlePostComment} className="bg-white rounded-2xl border border-stone-200 p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-stone-700">Add your voice</h3>
-                {isLoggedIn && user ? (
-                  <div className="flex items-center gap-2">
-                    <img src={user.avatar} alt={user.name} className="w-6 h-6 rounded-full object-cover border border-stone-200" />
-                    <span className="text-xs font-medium text-stone-600">@{user.handle}</span>
-                  </div>
-                ) : (
-                  <Link to="/auth/login" className="text-xs text-stone-400 hover:text-stone-700 transition-colors underline">
-                    Sign in to use your handle
-                  </Link>
-                )}
-              </div>
-
-              <textarea
-                rows={3}
-                placeholder="Challenge, agree, or add nuance…"
-                value={newCommentText}
-                onChange={(e) => setNewCommentText(e.target.value)}
-                className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:border-transparent transition-all resize-none"
-                style={{ ["--tw-ring-color" as string]: `${BRAND}40` }}
-              />
-
-              <div className="flex items-center justify-between">
-                <label className="flex items-center gap-2 text-xs text-stone-500 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={isCounterpoint}
-                    onChange={(e) => setIsCounterpoint(e.target.checked)}
-                    className="w-3.5 h-3.5 rounded"
-                  />
-                  Mark as counterpoint
-                </label>
-
-                <button
-                  type="submit"
-                  disabled={!newCommentText.trim()}
-                  className="flex items-center gap-2 h-9 px-5 rounded-full text-sm font-semibold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90"
-                  style={{ background: BRAND }}
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  Post
-                </button>
-              </div>
-            </form>
-          </section>
-
-          {/* ── Related Ideas ───────────────────────────────────────────── */}
+          {/* ── Related Ideas (always below the tabs) ───────────────────── */}
           {relatedQuotes.length > 0 && (
-            <section>
+            <section className="mt-12">
               <h2 className="font-semibold text-stone-700 mb-4">Related ideas</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {relatedQuotes.map((rq) => (
@@ -917,7 +978,6 @@ export default function QuotePage() {
               </div>
             </section>
           )}
-
         </main>
 
         <SiteFooter />
