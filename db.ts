@@ -352,15 +352,25 @@ export async function upsertAuthor(a: {
 // (including the potentially-large `enrichment` JSONB column). A short TTL
 // keeps reads cheap while staying close to real-time for admin edits.
 let runtimeQuotesCache: { rows: any[]; expiresAt: number } | null = null;
-const RUNTIME_QUOTES_CACHE_TTL_MS = 30_000;
+// 5 min: every admin write (create/update/bulk) calls invalidateRuntimeQuotesCache(),
+// so a long TTL stays accurate while drastically cutting full-table reads to Neon.
+const RUNTIME_QUOTES_CACHE_TTL_MS = 300_000;
 
 function invalidateRuntimeQuotesCache() {
   runtimeQuotesCache = null;
 }
 
+// Columns needed for list/feed views. Deliberately EXCLUDES the large `enrichment`
+// JSONB — no consumer of this list uses it (the quote-detail insights endpoint
+// reads enrichment via getRuntimeQuoteBySlug instead). Selecting it here pulled
+// several KB per quote on every page load / OG crawl — the main Neon bandwidth sink.
+const LIST_COLS =
+  "id, slug, text, author, source, source_url, year, category, context, " +
+  "tags, source_type, status, submitted_by, likes, bookmarks, created_at";
+
 export async function getRuntimeQuotes(status?: string) {
   if (!runtimeQuotesCache || runtimeQuotesCache.expiresAt < Date.now()) {
-    const { rows } = await pool.query("SELECT * FROM runtime_quotes ORDER BY created_at DESC");
+    const { rows } = await pool.query(`SELECT ${LIST_COLS} FROM runtime_quotes ORDER BY created_at DESC`);
     runtimeQuotesCache = {
       rows: rows.map((r: any) => ({ ...r, tags: r.tags ?? [] })),
       expiresAt: Date.now() + RUNTIME_QUOTES_CACHE_TTL_MS,
@@ -443,13 +453,14 @@ export async function bulkEditRuntimeQuotes(
 /** Set status on many runtime quotes in a single query (by id list or by current-status filter). */
 export async function bulkSetRuntimeQuoteStatus(
   newStatus: string,
-  opts: { ids?: string[]; whereStatus?: string; whereSourceType?: string }
+  opts: { ids?: string[]; whereStatus?: string; whereSourceType?: string; whereCategory?: string }
 ): Promise<number> {
   const where: string[] = [];
   const params: any[] = [newStatus];
   if (opts.ids && opts.ids.length) { params.push(opts.ids); where.push(`id = ANY($${params.length}::text[])`); }
   if (opts.whereStatus)     { params.push(opts.whereStatus);     where.push(`status = $${params.length}`); }
   if (opts.whereSourceType) { params.push(opts.whereSourceType); where.push(`source_type = $${params.length}`); }
+  if (opts.whereCategory)   { params.push(opts.whereCategory);   where.push(`category = $${params.length}`); }
   if (where.length === 0) return 0;
   const { rowCount } = await pool.query(
     `UPDATE runtime_quotes SET status=$1 WHERE ${where.join(" AND ")}`, params
