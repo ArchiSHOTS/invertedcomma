@@ -221,6 +221,11 @@ export async function getAllUsers() {
   return rows.map(rowToUser);
 }
 
+export async function getUserCount() {
+  const { rows } = await pool.query<{ count: string }>("SELECT COUNT(*) FROM users");
+  return parseInt(rows[0].count, 10) || 0;
+}
+
 export async function createUser(u: {
   id: string; email: string; passwordHash: string; displayName: string;
   handle: string; avatar: string; interests: string[]; role?: string;
@@ -533,6 +538,18 @@ export async function getAllSubscribers() {
     "SELECT * FROM subscribers ORDER BY subscribed_at DESC"
   );
   return rows.map(mapSubscriber);
+}
+
+export async function getSubscriberCount() {
+  const { rows } = await pool.query<{ count: string }>("SELECT COUNT(*) FROM subscribers");
+  return parseInt(rows[0].count, 10) || 0;
+}
+
+export async function getUserCountByRole(role: string) {
+  const { rows } = await pool.query<{ count: string }>(
+    "SELECT COUNT(*) FROM users WHERE role = $1", [role]
+  );
+  return parseInt(rows[0].count, 10) || 0;
 }
 
 export async function getSubscriberByEmail(email: string) {

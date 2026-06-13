@@ -49,6 +49,7 @@ import {
   updateRuntimeQuote, deleteRuntimeQuote, bulkSetRuntimeQuoteStatus, bulkEditRuntimeQuotes,
   getComments, createComment, likeComment, deleteComment, getAllComments,
   addSubscriber, getAllSubscribers, setSubscriberStatus,
+  getUserCount, getSubscriberCount, getUserCountByRole,
   getInsight, setInsight,
   getAnatomy, upsertAnatomy, getAnatomyQuoteIds,
   toggleQuoteLike,
@@ -1278,17 +1279,23 @@ app.delete("/api/admin/users/:id", superAdminMiddleware, async (req: any, res) =
 app.get("/api/admin/stats", adminMiddleware, async (req, res) => {
   const allSeed   = getEnrichedQuotes();
   const rq        = await getRuntimeQuotes();
-  const users     = await getAllUsers();
-  const subs      = await getAllSubscribers();
   const pending   = rq.filter(q => q.status === "pending").length;
   const published = allSeed.length + rq.filter(q => q.status === "published").length;
+
+  // Use lightweight COUNT queries instead of fetching all records just to count them.
+  // This saves significant bandwidth on stats lookups.
+  const totalUsers       = await getUserCount();
+  const totalSubscribers = await getSubscriberCount();
+  const admins           = await getUserCountByRole("admin");
+  const moderators       = await getUserCountByRole("moderator");
+
   res.json({
     totalQuotes:      published,
     pendingQuotes:    pending,
-    totalUsers:       users.length,
-    totalSubscribers: subs.length,
-    admins:           users.filter(u => u.role === "admin").length,
-    moderators:       users.filter(u => u.role === "moderator").length,
+    totalUsers,
+    totalSubscribers,
+    admins,
+    moderators,
   });
 });
 
