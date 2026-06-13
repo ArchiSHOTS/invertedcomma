@@ -63,7 +63,32 @@ const AUTHORS: [string, string][] = [
   ["Henry David Thoreau", "Society & Change"],
 ];
 
+// Wikiquote category tree → our site category. The crawler walks each root and its
+// subcategories (depth-limited) to discover authors far beyond the curated seed
+// above. Wikiquote category titles must match exactly; a root that returns nothing
+// is logged and skipped, so the seed authors still import. Earlier roots win when
+// the same author appears under multiple categories.
+const ROOT_CATEGORIES: [string, string][] = [
+  ["Philosophers",   "Philosophy & Stoicism"],
+  ["Writers",        "Literature & Writing"],
+  ["Authors",        "Literature & Writing"],
+  ["Poets",          "Literature & Writing"],
+  ["Scientists",     "Science & Technology"],
+  ["Physicists",     "Science & Technology"],
+  ["Psychologists",  "Psychology & Mind"],
+  ["Political leaders", "Leadership"],
+  ["Entrepreneurs",  "Business & Entrepreneurship"],
+  ["Businesspeople", "Business & Entrepreneurship"],
+  ["Designers",      "Design & Architecture"],
+  ["Artists",        "Creativity & Art"],
+  ["Religious figures", "Spirituality"],
+  ["Spiritual teachers", "Spirituality"],
+];
+
 const SKIP_SECTION = /(misattribut|disputed|quotes about|^about\b|see also|external links?|references?|notes?|bibliography|further reading|sources and notes)/i;
+
+// Category/page titles that are clearly not a quotable person — skip during crawl.
+const SKIP_PAGE = /^(List of|Lists of|Index of|Wikiquote:|Template:|Portal:|Category:)/i;
 
 async function fetchWikitext(page: string): Promise<string | null> {
   const url = `https://en.wikiquote.org/w/api.php?action=parse&page=${encodeURIComponent(page)}` +
@@ -73,6 +98,70 @@ async function fetchWikitext(page: string): Promise<string | null> {
   const json: any = await res.json();
   if (json.error || !json.parse || !json.parse.wikitext) return null;
   return json.parse.wikitext as string;
+}
+
+// List members of a Wikiquote category. `type` is "page" (articles → authors) or
+// "subcat" (child categories). Follows continuation up to `maxPages` of results.
+async function fetchCategoryMembers(
+  category: string, type: "page" | "subcat", maxPages = 5,
+): Promise<string[]> {
+  const titles: string[] = [];
+  let cont: string | undefined;
+  for (let page = 0; page < maxPages; page++) {
+    const url = `https://en.wikiquote.org/w/api.php?action=query&list=categorymembers` +
+      `&cmtitle=${encodeURIComponent("Category:" + category)}` +
+      `&cmtype=${type}&cmlimit=500&format=json&formatversion=2` +
+      (cont ? `&cmcontinue=${encodeURIComponent(cont)}` : "");
+    let json: any = null;
+    try {
+      const res = await fetch(url, { headers: { "User-Agent": UA, "Accept": "application/json" } });
+      if (!res.ok) break;
+      json = await res.json();
+    } catch { break; }
+    for (const m of json?.query?.categorymembers || []) {
+      const title = String(m.title || "");
+      if (type === "subcat") titles.push(title.replace(/^Category:/, ""));
+      else if (!SKIP_PAGE.test(title)) titles.push(title);
+    }
+    cont = json?.continue?.cmcontinue;
+    if (!cont) break;
+    await sleep(REQUEST_DELAY_MS);
+  }
+  return titles;
+}
+
+// Walk each root category (and subcategories, depth-limited) to build a deduped
+// author → site-category map. Seeded with the curated AUTHORS so a mistyped or
+// empty Wikiquote root never costs us the reliable base set. Stops once `maxAuthors`
+// distinct authors are found.
+async function discoverAuthors(
+  maxDepth: number, maxAuthors: number,
+  onProgress?: (info: { category: string; found: number }) => void,
+): Promise<Map<string, string>> {
+  const authors = new Map<string, string>();
+  for (const [page, cat] of AUTHORS) authors.set(page, cat);
+
+  const visited = new Set<string>();
+  // Queue of [categoryTitle, siteCategory, depth]
+  const queue: [string, string, number][] = ROOT_CATEGORIES.map(([c, our]) => [c, our, 0]);
+
+  while (queue.length && authors.size < maxAuthors) {
+    const [cat, ourCat, depth] = queue.shift()!;
+    if (visited.has(cat)) continue;
+    visited.add(cat);
+
+    const pages = await fetchCategoryMembers(cat, "page");
+    for (const p of pages) { if (!authors.has(p)) authors.set(p, ourCat); }
+    onProgress?.({ category: cat, found: authors.size });
+    await sleep(REQUEST_DELAY_MS);
+
+    if (depth < maxDepth) {
+      const subs = await fetchCategoryMembers(cat, "subcat");
+      for (const s of subs) if (!visited.has(s)) queue.push([s, ourCat, depth + 1]);
+      await sleep(REQUEST_DELAY_MS);
+    }
+  }
+  return authors;
 }
 
 function extractRawQuotes(wikitext: string): { raw: string; sourceRaw: string }[] {
@@ -137,7 +226,9 @@ function looksNonEnglish(t: string): boolean {
 }
 
 function isGoodQuote(t: string): boolean {
-  if (t.length < 20 || t.length > 400) return false;
+  // 30–180 chars: long enough to be a real quote, short enough to sit comfortably
+  // inside the share card (which hard-truncates at 220) with breathing room.
+  if (t.length < 30 || t.length > 180) return false;
   if (/[{}|]|\[\[|\]\]|https?:\/\//.test(t)) return false;
   if (/^[a-z]/.test(t)) return false;
   if (!/[.?!"”]$/.test(t)) return false;
@@ -158,6 +249,7 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 // ── Live status (for the admin UI to poll) ────────────────────────────────────
 export interface ImportStatus {
   running: boolean;
+  phase: "idle" | "discovering" | "importing" | "done";
   imported: number;
   authorsDone: number;
   authorsTotal: number;
@@ -166,21 +258,31 @@ export interface ImportStatus {
   error: string | null;
 }
 export const importStatus: ImportStatus = {
-  running: false, imported: 0, authorsDone: 0, authorsTotal: AUTHORS.length,
+  running: false, phase: "idle", imported: 0, authorsDone: 0, authorsTotal: AUTHORS.length,
   startedAt: null, finishedAt: null, error: null,
 };
 
 export interface ImportOptions {
-  maxPerAuthor?: number;
+  maxPerAuthor?: number;   // cap quotes kept per author
+  targetCount?: number;    // stop once this many NEW quotes are imported
+  maxDepth?: number;       // category-tree recursion depth
+  maxAuthors?: number;     // cap on authors discovered (bounds crawl time)
   dryRun?: boolean;
   onProgress?: (info: { page: string; parsed: number; kept: number; total: number }) => void;
 }
 
 /** Run the import. Updates `importStatus` as it goes. Returns the total imported. */
 export async function importWikiquote(opts: ImportOptions = {}): Promise<number> {
-  const { maxPerAuthor = 60, dryRun = false, onProgress } = opts;
+  const {
+    maxPerAuthor = 40,
+    targetCount  = 200,  // curated monthly imports, not bulk
+    maxDepth     = 2,
+    maxAuthors   = 2000,
+    dryRun = false, onProgress,
+  } = opts;
 
   importStatus.running = true;
+  importStatus.phase = "discovering";
   importStatus.imported = 0;
   importStatus.authorsDone = 0;
   importStatus.authorsTotal = AUTHORS.length;
@@ -193,8 +295,19 @@ export async function importWikiquote(opts: ImportOptions = {}): Promise<number>
     const runtime = await getRuntimeQuotes();
     const seen = new Set([...seed, ...runtime].map((q: any) => norm(q.text)));
 
+    // Phase 1 — discover the author pool by crawling the category tree.
+    const authorMap = await discoverAuthors(maxDepth, maxAuthors, ({ found }) => {
+      importStatus.authorsTotal = found;
+    });
+    const authorList = [...authorMap.entries()]; // [page, siteCategory][]
+
+    // Phase 2 — pull quotes per author until we hit the target count.
+    importStatus.phase = "importing";
+    importStatus.authorsTotal = authorList.length;
+
     let total = 0;
-    for (const [page, category] of AUTHORS) {
+    for (const [page, category] of authorList) {
+      if (total >= targetCount) break;
       let wt: string | null = null;
       try { wt = await fetchWikitext(page); } catch { wt = null; }
       if (wt) {
@@ -202,7 +315,7 @@ export async function importWikiquote(opts: ImportOptions = {}): Promise<number>
         const sourceUrl = `https://en.wikiquote.org/wiki/${page.replace(/ /g, "_")}`;
         let kept = 0;
         for (const item of raw) {
-          if (kept >= maxPerAuthor) break;
+          if (kept >= maxPerAuthor || total >= targetCount) break;
           const text = clean(item.raw);
           if (!isGoodQuote(text)) continue;
           const key = norm(text);
@@ -222,14 +335,15 @@ export async function importWikiquote(opts: ImportOptions = {}): Promise<number>
             });
           }
           kept++;
+          total++;
         }
-        total += kept;
         importStatus.imported = total;
         onProgress?.({ page, parsed: raw.length, kept, total });
       }
       importStatus.authorsDone++;
       await sleep(REQUEST_DELAY_MS);
     }
+    importStatus.phase = "done";
     return total;
   } catch (e: any) {
     importStatus.error = e?.message || String(e);
@@ -240,4 +354,4 @@ export async function importWikiquote(opts: ImportOptions = {}): Promise<number>
   }
 }
 
-export { AUTHORS };
+export { AUTHORS, ROOT_CATEGORIES };

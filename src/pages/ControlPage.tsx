@@ -414,6 +414,7 @@ const CATEGORIES = [
   "Education & Knowledge", "Sports & Discipline", "Love & Relationships",
   "Society & Change", "Economics & Wealth", "Health & Well-being",
   "Innovation & Future", "Minimalism & Focus", "Truth & Language", "Humour & Paradox",
+  "Spirituality",
 ];
 
 // ── Add Quote Form ────────────────────────────────────────────────────────────
@@ -738,6 +739,7 @@ function QuotesTab() {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<"all" | "published" | "pending" | "rejected">("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [addMode, setAddMode] = useState<null | "manual" | "youtube" | "paste">(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -759,7 +761,7 @@ function QuotesTab() {
 
   // Wikiquote import progress (polled while running)
   const [wqImport, setWqImport] = useState<null | {
-    running: boolean; imported: number; authorsDone: number; authorsTotal: number; error: string | null;
+    running: boolean; phase?: string; imported: number; authorsDone: number; authorsTotal: number; error: string | null;
   }>(null);
 
   // Bulk selection
@@ -786,15 +788,16 @@ function QuotesTab() {
 
   const displayed = quotes.filter(q => {
     const matchStatus = statusFilter === "all" || (q.status || "published") === statusFilter;
+    const matchCategory = categoryFilter === "all" || q.category === categoryFilter;
     const term = search.toLowerCase();
     const matchSearch = !term ||
       q.text.toLowerCase().includes(term) ||
       q.author.toLowerCase().includes(term) ||
       (q.source || "").toLowerCase().includes(term) ||
       q.category.toLowerCase().includes(term);
-    return matchStatus && matchSearch;
+    return matchStatus && matchCategory && matchSearch;
   });
-  const paged = usePaged([search, statusFilter]);
+  const paged = usePaged([search, statusFilter, categoryFilter]);
 
 
   const pollImport = useCallback(() => {
@@ -809,10 +812,10 @@ function QuotesTab() {
   }, [load]);
 
   const startWikiquoteImport = async () => {
-    if (!confirm("Import ~2,000 attributed quotes from Wikiquote? They'll arrive as 'pending' for your review.")) return;
-    setWqImport({ running: true, imported: 0, authorsDone: 0, authorsTotal: 44, error: null });
+    if (!confirm("Crawl Wikiquote categories and discover ~200 quotes for curation? This walks Philosophy, Literature, Science, Psychology, Leadership, Business, Design, Art and Spirituality (takes 5–10 minutes). Quotes arrive as 'pending' — review and approve the ones with real depth.")) return;
+    setWqImport({ running: true, phase: "discovering", imported: 0, authorsDone: 0, authorsTotal: 0, error: null });
     const res = await fetch("/api/admin/import-wikiquote", {
-      method: "POST", headers: authHeaders(), body: JSON.stringify({ max: 60 }),
+      method: "POST", headers: authHeaders(), body: JSON.stringify({ target: 200, max: 40, depth: 2 }),
     });
     if (res.status === 409) { const d = await res.json(); setWqImport(d.status); }
     pollImport();
@@ -840,7 +843,12 @@ function QuotesTab() {
   const bulkBody = (): string => {
     const allMatchingFilter =
       selected.size === displayed.length && statusFilter !== "all" && !search.trim();
-    return JSON.stringify(allMatchingFilter ? { status: statusFilter } : { ids: [...selected] });
+    if (allMatchingFilter) {
+      const filter: Record<string, string> = { status: statusFilter };
+      if (categoryFilter !== "all") filter.category = categoryFilter;
+      return JSON.stringify(filter);
+    }
+    return JSON.stringify({ ids: [...selected] });
   };
 
   const bulkApprove = async () => {
@@ -1067,8 +1075,10 @@ function QuotesTab() {
           {wqImport.error
             ? `Import failed: ${wqImport.error}`
             : wqImport.running
-              ? `Importing from Wikiquote… ${wqImport.imported} quotes added (${wqImport.authorsDone}/${wqImport.authorsTotal} authors). You can keep working — this runs in the background.`
-              : `Import complete — ${wqImport.imported} pending quotes added. Review them in the Pending tab below.`}
+              ? (wqImport.phase === "discovering"
+                  ? `Discovering authors from Wikiquote categories… ${wqImport.authorsTotal} found so far. You can keep working — this runs in the background.`
+                  : `Importing from Wikiquote… ${wqImport.imported} quotes added (${wqImport.authorsDone}/${wqImport.authorsTotal} authors). You can keep working — this runs in the background.`)
+              : `Import complete — ${wqImport.imported} pending quotes added. Review by category and approve only the ones with real depth.`}
         </div>
       )}
 
@@ -1096,6 +1106,14 @@ function QuotesTab() {
             </button>
           ))}
         </div>
+        <select
+          value={categoryFilter}
+          onChange={e => setCategoryFilter(e.target.value)}
+          className="h-9 px-3 text-xs font-medium border border-stone-200 rounded-xl bg-white text-stone-700 focus:outline-none focus:ring-2 focus:ring-stone-900/10"
+        >
+          <option value="all">All categories</option>
+          {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
       </div>
 
       {/* ── Manual add form ── */}
@@ -1363,7 +1381,7 @@ function QuotesTab() {
               <input type="checkbox" checked={selected.size > 0 && selected.size === displayed.length}
                 onChange={toggleSelectAll} className="w-4 h-4 cursor-pointer" />
               <span className="text-xs text-stone-500">
-                Select all <strong>{displayed.length.toLocaleString()}</strong> {statusFilter === "all" ? "quotes" : statusFilter} matching this filter
+                Select all <strong>{displayed.length.toLocaleString()}</strong> {statusFilter === "all" ? "quotes" : statusFilter}{categoryFilter !== "all" ? ` in ${categoryFilter}` : ""} matching this filter
               </span>
             </label>
           )}

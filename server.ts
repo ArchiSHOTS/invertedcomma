@@ -710,6 +710,11 @@ function slugify(text: string, author: string): string {
     .trim() + "-" + Math.random().toString(36).slice(2, 6);
 }
 
+// ── Health check (for splash page to detect when server is ready) ──────────────
+app.get("/api/health", (_req, res) => {
+  res.status(200).json({ ok: true });
+});
+
 // ── Auth endpoints ────────────────────────────────────────────────────────────
 
 app.post("/api/auth/register", validate(RegisterSchema), async (req: any, res) => {
@@ -1147,9 +1152,13 @@ app.post("/api/admin/import-wikiquote", adminMiddleware, async (req: any, res) =
   if (importStatus.running) {
     return res.status(409).json({ error: "An import is already running.", status: importStatus });
   }
-  const maxPerAuthor = Math.min(Math.max(Number(req.body?.max) || 60, 5), 120);
-  // Fire and forget — the admin UI polls /status. Don't await (it takes ~1 min).
-  importWikiquote({ maxPerAuthor }).catch(e => console.error("[wikiquote] import failed:", e?.message));
+  const maxPerAuthor = Math.min(Math.max(Number(req.body?.max) || 40, 5), 120);
+  const targetCount  = Math.min(Math.max(Number(req.body?.target) || 5000, 100), 20000);
+  const maxDepth     = Math.min(Math.max(Number(req.body?.depth) || 2, 0), 3);
+  // Fire and forget — the admin UI polls /status. A full category crawl can take
+  // 15–40 min, so we never await it here.
+  importWikiquote({ maxPerAuthor, targetCount, maxDepth })
+    .catch(e => console.error("[wikiquote] import failed:", e?.message));
   res.status(202).json({ started: true });
 });
 
@@ -1167,17 +1176,18 @@ const BulkSchema = z.object({
   ids: z.array(z.string()).optional(),
   status: z.enum(["pending", "published", "rejected"]).optional(),
   sourceType: z.string().optional(),
+  category: z.string().optional(),
 });
 
 async function bulkSetStatus(req: any, res: any, newStatus: string) {
   const parsed = BulkSchema.safeParse(req.body || {});
   if (!parsed.success) return res.status(400).json({ error: "Invalid request" });
-  const { ids, status, sourceType } = parsed.data;
-  if ((!ids || ids.length === 0) && !status && !sourceType) {
-    return res.status(400).json({ error: "Provide ids[] or a status/sourceType filter" });
+  const { ids, status, sourceType, category } = parsed.data;
+  if ((!ids || ids.length === 0) && !status && !sourceType && !category) {
+    return res.status(400).json({ error: "Provide ids[] or a status/sourceType/category filter" });
   }
   const updated = await bulkSetRuntimeQuoteStatus(newStatus, {
-    ids, whereStatus: status, whereSourceType: sourceType,
+    ids, whereStatus: status, whereSourceType: sourceType, whereCategory: category,
   });
   res.json({ updated });
 }
