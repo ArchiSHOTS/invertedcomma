@@ -12,3 +12,6 @@ data/users.json
 data/authors.json
 data/runtime-quotes.json
 .claude/
+
+# Database dumps — prevent accidental commits of PII
+*.sql
