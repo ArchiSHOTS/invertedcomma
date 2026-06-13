@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Bookmark, Settings, LogOut, Bell, BellOff,
-  Save, X, Check, ChevronRight, BookOpen,
+  Save, X, Check, BookOpen,
   Clock, Tag, Eye, EyeOff, AlertCircle, ExternalLink,
   Sparkles, Trash2, FolderHeart, Plus, FolderOpen, Folder,
 } from "lucide-react";
@@ -241,25 +241,8 @@ export default function MePage() {
     ));
   };
 
-  // ── Submissions ────────────────────────────────────────────────────────────
-  const [submissions, setSubmissions] = useState<any[]>([]);
-  const [subLoading, setSubLoading] = useState(false);
-
-  const loadSubmissions = useCallback(async () => {
-    setSubLoading(true);
-    try {
-      const r = await fetch("/api/quotes", { headers: authHeaders() });
-      if (r.ok) {
-        const d = await r.json();
-        const mine = (d.quotes || []).filter((q: any) =>
-          user?.submittedQuoteIds?.includes(q.id)
-        );
-        setSubmissions(mine);
-      }
-    } finally { setSubLoading(false); }
-  }, [user?.submittedQuoteIds]);
-
-  useEffect(() => { if (tab === "submissions") loadSubmissions(); }, [tab, loadSubmissions]);
+  // ── Submissions ──────────────────────────────────────────────────────────
+  // User-submitted quotes feature is not live yet — the tab shows a placeholder.
 
   // ── Settings ───────────────────────────────────────────────────────────────
   const [displayName, setDisplayName] = useState("");
@@ -582,41 +565,13 @@ export default function MePage() {
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-sm font-bold text-stone-700">Your submitted quotes</h2>
             </div>
-            {subLoading ? (
-              <div className="space-y-3">
-                {[...Array(3)].map((_, i) => <div key={i} className="h-20 bg-stone-100 rounded-2xl animate-pulse" />)}
+            <div className="text-center py-20">
+              <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: `${BRAND}14` }}>
+                <Sparkles className="w-5 h-5" style={{ color: BRAND }} />
               </div>
-            ) : submissions.length === 0 ? (
-              <div className="text-center py-20">
-                <BookOpen className="w-8 h-8 text-stone-200 mx-auto mb-3" />
-                <p className="text-stone-400 text-sm">You haven't submitted any quotes yet.</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {submissions.map(q => (
-                  <div key={q.id} className="bg-white border border-stone-200 rounded-2xl p-4 flex items-start gap-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="font-serif italic text-sm text-stone-800 line-clamp-2">"{q.text}"</p>
-                      <p className="text-xs text-stone-500 mt-1">— {q.author}</p>
-                    </div>
-                    <div className="flex flex-col items-end gap-2 flex-shrink-0">
-                      <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                        q.status === "published" ? "bg-green-50 text-green-600" :
-                        q.status === "rejected" ? "bg-red-50 text-red-500" :
-                        "bg-amber-50 text-amber-600"
-                      }`}>
-                        {q.status || "published"}
-                      </span>
-                      {q.status === "published" && (
-                        <Link to={`/q/${q.slug}`} className="text-[10px] text-stone-400 hover:text-stone-700 flex items-center gap-0.5">
-                          View <ChevronRight className="w-3 h-3" />
-                        </Link>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+              <p className="text-sm font-semibold text-stone-700">Submit your own quotes</p>
+              <p className="text-stone-400 text-sm mt-1.5">Feature coming soon — you'll soon be able to submit quotes for the collection.</p>
+            </div>
           </div>
         )}
 
