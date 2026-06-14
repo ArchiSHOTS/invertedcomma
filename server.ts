@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
 import helmet from "helmet";
+import compression from "compression";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import { z, ZodSchema } from "zod";
@@ -53,6 +54,7 @@ import {
   getInsight, setInsight,
   getAnatomy, upsertAnatomy, getAnatomyQuoteIds,
   toggleQuoteLike,
+  upsertSocialContent, getSocialContent, listSocialContent, deleteSocialContent,
 } from "./db.ts";
 import { sendVerificationEmail, sendWelcomeEmail, sendSubscriberWelcomeEmail, type WelcomeQuote } from "./email.ts";
 import { importWikiquote, importStatus } from "./wikiquote.ts";
@@ -60,6 +62,10 @@ import { importWikiquote, importStatus } from "./wikiquote.ts";
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 const IS_PROD = process.env.NODE_ENV === "production";
+
+// ── Compression: gzip/brotli all responses — JSON quote payloads shrink ~70-80%,
+// the single biggest lever on Neon egress short of paginating /api/quotes.
+app.use(compression());
 
 // ── Security: HTTP headers ────────────────────────────────────────────────────
 app.use(helmet({
@@ -1007,6 +1013,7 @@ app.post("/api/author/:slug/regenerate", adminMiddleware, async (req: any, res) 
 
 app.get("/api/quotes", async (req, res) => {
   const dbRQ = await getRuntimeQuotes("published");
+  res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
   res.json({ quotes: [...getEnrichedQuotes(), ...dbRQ] });
 });
 
@@ -1015,6 +1022,7 @@ app.get("/api/tags", (req, res) => {
   const tagCounts: Record<string, number> = {};
   quotes.forEach((q) => q.tags.forEach((tag) => { tagCounts[tag] = (tagCounts[tag] || 0) + 1; }));
   AVAILABLE_TAGS.forEach((tag) => { if (!tagCounts[tag]) tagCounts[tag] = 0; });
+  res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=3600");
   res.json({ tags: Object.entries(tagCounts).map(([name, count]) => ({ name, count })) });
 });
 
@@ -1396,6 +1404,40 @@ Search the web for scholarly critiques, philosophical objections, or documented 
     console.error("[Gemini] Counterpoint error:", err.message);
     res.status(500).json({ error: "Failed to generate counterpoint: " + err.message });
   }
+});
+
+// ── Social Content (saved 4-card bundles) ──────────────────────────────────────
+const SocialContentSchema = z.object({
+  context:      z.string().max(4000).optional().default(""),
+  authorLine:   z.string().max(200).optional().default(""),
+  authorBio:    z.string().max(4000).optional().default(""),
+  counterpoint: z.string().max(4000).optional().default(""),
+});
+
+// List saved bundles for the dashboard.
+app.get("/api/admin/social-content", adminMiddleware, async (_req, res) => {
+  res.json({ items: await listSocialContent() });
+});
+
+// Fetch one saved bundle (to know whether a quote already has content).
+app.get("/api/admin/social-content/:quoteId", adminMiddleware, async (req, res) => {
+  const row = await getSocialContent(req.params.quoteId);
+  if (!row) return res.status(404).json({ error: "No saved social content for this quote" });
+  res.json({ item: row });
+});
+
+// Create/update a saved bundle. The client renders card images locally; we only
+// persist the lightweight text snapshots so re-downloads never re-call the AI.
+app.post("/api/admin/social-content/:quoteId", adminMiddleware, validate(SocialContentSchema), async (req: any, res) => {
+  const { context, authorLine, authorBio, counterpoint } = req.validated as z.infer<typeof SocialContentSchema>;
+  const row = await upsertSocialContent(req.params.quoteId, { context, authorLine, authorBio, counterpoint });
+  res.status(201).json({ item: row });
+});
+
+app.delete("/api/admin/social-content/:quoteId", adminMiddleware, async (req, res) => {
+  const ok = await deleteSocialContent(req.params.quoteId);
+  if (!ok) return res.status(404).json({ error: "No saved social content for this quote" });
+  res.json({ ok: true });
 });
 
 // ── Admin: YouTube extraction ─────────────────────────────────────────────────

@@ -1,23 +1,10 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { X, Download, Copy, Check } from "lucide-react";
 import { Quote } from "../types";
+import { Format, Theme, FORMATS, THEMES, drawQuoteCard } from "../lib/quoteCard";
 
-// --- Types --------------------------------------------------------------------
-type Format = "square" | "story" | "twitter";
-type Theme  = "green" | "dark" | "cream" | "minimal";
-
-const FORMATS: Record<Format, { platform: string; w: number; h: number; pad: number }> = {
-  square:  { platform: "Instagram / Facebook", w: 1080, h: 1080, pad: 88  },
-  story:   { platform: "Stories",              w: 1080, h: 1920, pad: 100 },
-  twitter: { platform: "Twitter / X",          w: 1200, h: 628,  pad: 72  },
-};
-
-const THEMES: Record<Theme, { swatch: string; bg: string; text: string; accent: string; border: string; brand: string; tagBg: string }> = {
-  green:   { swatch: "#3D5A3E", bg: "#0F1F10", text: "#FFFFFF", accent: "#7FAF82", border: "#2D4A2E", brand: "#FFFFFF", tagBg: "#1B3A1D" },
-  dark:    { swatch: "#1A1A1A", bg: "#1A1A1A", text: "#FFFFFF", accent: "#9A948C", border: "#2F2F2F", brand: "#FFFFFF", tagBg: "#282828" },
-  cream:   { swatch: "#FBF9F6", bg: "#FBF9F6", text: "#1A1A1A", accent: "#6B665E", border: "#DDD9D0", brand: "#3D5A3E", tagBg: "#EDE9E3" },
-  minimal: { swatch: "#FFFFFF", bg: "#FFFFFF", text: "#111111", accent: "#888888", border: "#DEDEDE", brand: "#3D5A3E", tagBg: "#F2F2F2" },
-};
+// ShareCard exposes three classic formats; the full set lives in lib/quoteCard.
+const SHARE_FORMATS: Format[] = ["square", "story", "twitter"];
 
 // --- Format shape icons -------------------------------------------------------
 // All drawn in a shared 48×48 viewBox; shapes are proportional silhouettes,
@@ -51,196 +38,6 @@ interface ShareCardModalProps {
   onClose: () => void;
 }
 
-// --- Canvas helpers -----------------------------------------------------------
-function rrect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
-  const R = Math.min(r, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + R, y);
-  ctx.lineTo(x + w - R, y);
-  ctx.quadraticCurveTo(x + w, y,     x + w, y + R);
-  ctx.lineTo(x + w, y + h - R);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - R, y + h);
-  ctx.lineTo(x + R, y + h);
-  ctx.quadraticCurveTo(x, y + h,     x, y + h - R);
-  ctx.lineTo(x, y + R);
-  ctx.quadraticCurveTo(x, y,         x + R, y);
-  ctx.closePath();
-}
-
-function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
-  const words = text.split(" ");
-  const lines: string[] = [];
-  let line = "";
-  for (const word of words) {
-    const test = line ? `${line} ${word}` : word;
-    if (ctx.measureText(test).width > maxWidth && line) { lines.push(line); line = word; }
-    else line = test;
-  }
-  if (line) lines.push(line);
-  return lines;
-}
-
-function fitQuote(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, maxHeight: number, maxPt: number, minPt: number): { size: number; lines: string[] } {
-  for (let size = maxPt; size >= minPt; size -= 2) {
-    ctx.font = `italic ${size}px Georgia, "Times New Roman", serif`;
-    const lines = wrapText(ctx, text, maxWidth);
-    if (lines.length * size * 1.45 <= maxHeight) return { size, lines };
-  }
-  ctx.font = `italic ${minPt}px Georgia, "Times New Roman", serif`;
-  return { size: minPt, lines: wrapText(ctx, text, maxWidth) };
-}
-
-// Colorise a loaded image to a flat colour via offscreen canvas compositing
-function tintedImage(src: HTMLImageElement, color: string, targetW: number, targetH: number): HTMLCanvasElement {
-  const tmp = document.createElement("canvas");
-  tmp.width  = targetW;
-  tmp.height = targetH;
-  const tc = tmp.getContext("2d")!;
-  tc.drawImage(src, 0, 0, targetW, targetH);
-  tc.globalCompositeOperation = "source-in";
-  tc.fillStyle = color;
-  tc.fillRect(0, 0, targetW, targetH);
-  return tmp;
-}
-
-// --- Draw a single card frame onto the canvas --------------------------------
-function drawCard(
-  canvas: HTMLCanvasElement,
-  quote: Quote,
-  format: Format,
-  theme: Theme,
-  logoImg: HTMLImageElement | null,
-) {
-  const cfg = FORMATS[format];
-  const t   = THEMES[theme];
-  const DPR = 2;
-
-  canvas.width  = cfg.w * DPR;
-  canvas.height = cfg.h * DPR;
-
-  const ctx = canvas.getContext("2d")!;
-  ctx.scale(DPR, DPR);
-
-  const W   = cfg.w;
-  const H   = cfg.h;
-  const PAD = cfg.pad;
-  const isTw = format === "twitter";
-
-  // -- Background --------------------------------------------------------------
-  ctx.fillStyle = t.bg;
-  ctx.fillRect(0, 0, W, H);
-
-  ctx.strokeStyle = t.border;
-  ctx.lineWidth = 1;
-  ctx.strokeRect(0.5, 0.5, W - 1, H - 1);
-
-  // -- Ghost quote mark --------------------------------------------------------
-  const glyphSize = Math.round(H * 0.62);
-  ctx.save();
-  ctx.font = `italic bold ${glyphSize}px Georgia, "Times New Roman", serif`;
-  ctx.fillStyle = t.accent;
-  ctx.globalAlpha = 0.07;
-  ctx.fillText("“", PAD - Math.round(glyphSize * 0.18), Math.round(H * 0.56));
-  ctx.restore();
-
-  // -- Tag pill ----------------------------------------------------------------
-  const tag       = (quote.tags[0] || quote.category || "quote").toUpperCase();
-  const tagLabel  = `#${tag}`;
-  const tagFontSz = isTw ? 20 : 24;
-  ctx.font = `bold ${tagFontSz}px Helvetica Neue, Arial, sans-serif`;
-  const tagTextW = ctx.measureText(tagLabel).width;
-  const tagPillH = tagFontSz + 18;
-  const tagPillW = tagTextW + 36;
-  ctx.fillStyle = t.tagBg;
-  rrect(ctx, PAD, PAD, tagPillW, tagPillH, tagPillH / 2);
-  ctx.fill();
-  ctx.fillStyle = t.accent;
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  ctx.fillText(tagLabel, PAD + 18, PAD + tagPillH / 2);
-
-  // -- Footer layout (bottom-up) -----------------------------------------------
-  // logo SVG aspect ratio from viewBox="0 0 1410 383"
-  const LOGO_ASPECT = 1410 / 383;
-  const logoH   = isTw ? 36 : 50;
-  const logoW   = logoH * LOGO_ASPECT;
-  const urlFontSz    = isTw ? 20 : 26;
-  const authorFontSz = isTw ? 22 : 28;
-
-  const urlY       = H - PAD;                           // url text baseline
-  const logoBottom = urlY - urlFontSz - (isTw ? 14 : 18);
-  const logoTop    = logoBottom - logoH;
-  const divY       = logoTop - (isTw ? 20 : 26);
-  const FOOTER_TOP = divY;
-
-  // -- Content zone ------------------------------------------------------------
-  const CONTENT_TOP = PAD + tagPillH + (isTw ? 28 : 44);
-  const CONTENT_H   = FOOTER_TOP - CONTENT_TOP - (isTw ? 28 : 40);
-  const QUOTE_W     = W - PAD * 2;
-
-  // -- Quote text --------------------------------------------------------------
-  const rawText     = quote.text.length > 220 ? quote.text.slice(0, 218) + "…" : quote.text;
-  const displayText = `“${rawText}”`;
-  const maxPt = isTw ? 52 : 72;
-  const minPt = isTw ? 28 : 36;
-
-  const AUTHOR_BLOCK_H = authorFontSz + (isTw ? 28 : 36);
-  const { size: quotePt, lines } = fitQuote(ctx, displayText, QUOTE_W, CONTENT_H - AUTHOR_BLOCK_H, maxPt, minPt);
-  const lineH       = quotePt * 1.45;
-  const quoteBlockH = lines.length * lineH;
-  const totalBlockH = quoteBlockH + AUTHOR_BLOCK_H;
-  const blockTop    = CONTENT_TOP + Math.max(0, (CONTENT_H - totalBlockH) / 2);
-
-  ctx.font = `italic ${quotePt}px Georgia, "Times New Roman", serif`;
-  ctx.fillStyle = t.text;
-  ctx.textAlign = "left";
-  ctx.textBaseline = "alphabetic";
-  let ty = blockTop + quotePt;
-  for (const line of lines) { ctx.fillText(line, PAD, ty); ty += lineH; }
-
-  // -- Author + year -----------------------------------------------------------
-  const authorText =
-    `— ${quote.author.toUpperCase()}` +
-    (quote.year ? `  ·  ${quote.year < 0 ? `${Math.abs(quote.year)} BC` : String(quote.year)}` : "");
-  const authorY = blockTop + quoteBlockH + (isTw ? 24 : 30) + authorFontSz;
-  ctx.font = `bold ${authorFontSz}px Helvetica Neue, Arial, sans-serif`;
-  ctx.fillStyle = t.accent;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "alphabetic";
-  ctx.fillText(authorText, W / 2, authorY);
-
-  // -- Divider -----------------------------------------------------------------
-  ctx.strokeStyle = t.border;
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(PAD, divY);
-  ctx.lineTo(W - PAD, divY);
-  ctx.stroke();
-
-  // -- Logo: SVG image or text fallback, centred --------------------------------
-  if (logoImg) {
-    // Render at 2× internal resolution for sharpness, then draw at logical size
-    const tinted = tintedImage(logoImg, t.brand, Math.round(logoW * DPR), Math.round(logoH * DPR));
-    const lx = (W - logoW) / 2;
-    ctx.drawImage(tinted, lx, logoTop, logoW, logoH);
-  } else {
-    // Fallback: letter-spaced text, centred
-    const logoFontSz = isTw ? 28 : 36;
-    ctx.font = `bold ${logoFontSz}px Helvetica Neue, Arial, sans-serif`;
-    ctx.fillStyle = t.brand;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "alphabetic";
-    ctx.fillText("INVERTED COMMA", W / 2, logoBottom);
-  }
-
-  // -- URL, centred ------------------------------------------------------------
-  ctx.font = `${urlFontSz}px Helvetica Neue, Arial, sans-serif`;
-  ctx.fillStyle = t.accent;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "alphabetic";
-  ctx.fillText("www.invertedcomma.com", W / 2, urlY);
-}
-
 // --- Component ----------------------------------------------------------------
 export default function ShareCardModal({ quote, onClose }: ShareCardModalProps) {
   const [format, setFormat]           = useState<Format>("square");
@@ -269,7 +66,7 @@ export default function ShareCardModal({ quote, onClose }: ShareCardModalProps) 
   // Re-render canvas whenever any input changes (or logo finishes loading)
   useEffect(() => {
     const canvas = getCanvas();
-    drawCard(canvas, quote, format, theme, logoRef.current);
+    drawQuoteCard(canvas, quote, format, theme, logoRef.current);
     setPreviewUrl(canvas.toDataURL("image/png"));
   }, [quote, format, theme, getCanvas, logoReady]);
 
@@ -324,7 +121,7 @@ export default function ShareCardModal({ quote, onClose }: ShareCardModalProps) 
             <div>
               <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-stone-400 mb-2">Format</p>
               <div className="flex justify-center gap-6">
-                {(Object.keys(FORMATS) as Format[]).map((key) => (
+                {SHARE_FORMATS.map((key) => (
                   <button
                     key={key}
                     onClick={() => setFormat(key)}
@@ -352,7 +149,6 @@ export default function ShareCardModal({ quote, onClose }: ShareCardModalProps) 
                       className="relative w-8 h-8 rounded-full transition-transform hover:scale-110 focus:outline-none"
                       style={{
                         background: th.swatch,
-                        // Always show a 1px border so cream/white are visible against the modal bg
                         boxShadow: theme === key
                           ? `0 0 0 1.5px #FBF9F6, 0 0 0 3.5px ${ringColor}`
                           : `0 0 0 1px ${isLight ? "#D6D0C8" : "transparent"}`,

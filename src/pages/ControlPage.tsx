@@ -8,10 +8,11 @@ import {
   X, ChevronDown, Menu, AlertCircle, BookOpen, Film, Mic2,
   Feather, Newspaper, Hash, Search, BarChart2, Link2,
   Crown, Shield, DollarSign, Megaphone, ShoppingBag, GripVertical,
-  ToggleLeft, ToggleRight, Copy, ImageIcon, MapPin, Globe,
+  ToggleLeft, ToggleRight, Copy, ImageIcon, MapPin, Globe, Download,
 } from "lucide-react";
 import { useUser } from "../context/UserContext";
 import Logo from "../components/Logo";
+import SocialContentModal from "../components/SocialContentModal";
 import { Quote, ExtractedQuote, Subscriber, SourceType } from "../types";
 
 const TOKEN_KEY = "ic_token";
@@ -769,6 +770,9 @@ function QuotesTab() {
   const [bulkApproving, setBulkApproving] = useState(false);
   const [bulkRejecting, setBulkRejecting] = useState(false);
 
+  // Social Content modal — the quote we're generating cards for
+  const [socialQuote, setSocialQuote] = useState<Quote | null>(null);
+
   const load = useCallback(() => {
     setLoading(true);
     // Merge the public list (seed + published) with the admin list (ALL runtime
@@ -1444,6 +1448,9 @@ function QuotesTab() {
                     className="w-7 h-7 border border-stone-200 rounded-full flex items-center justify-center text-stone-500 hover:bg-stone-50" title="Create / edit anatomy">
                     <FileSearch className="w-3 h-3" />
                   </a>
+                  <button onClick={() => setSocialQuote(q)} className="w-7 h-7 border border-stone-200 rounded-full flex items-center justify-center text-stone-500 hover:bg-stone-50" title="Create social content">
+                    <ImageIcon className="w-3 h-3" />
+                  </button>
                   {q.status === "pending" && (
                     <>
                       <button onClick={() => handleApprove(q.id)} className="w-7 h-7 border border-emerald-300 rounded-full flex items-center justify-center text-emerald-600 hover:bg-emerald-50" title="Approve">
@@ -1463,6 +1470,120 @@ function QuotesTab() {
           )}
           <Pagination page={paged.page} perPage={paged.perPage} total={displayed.length} onPage={paged.setPage} />
         </div>
+      )}
+
+      {socialQuote && (
+        <SocialContentModal quote={socialQuote} onClose={() => setSocialQuote(null)} />
+      )}
+    </div>
+  );
+}
+
+// ── Social Content tab — saved 4-card bundles ──────────────────────────────────
+interface SocialItem {
+  quote_id: string; created_at: string; updated_at: string;
+  quote_text: string | null; quote_author: string | null; quote_slug: string | null;
+}
+function SocialContentTab() {
+  const [items, setItems]   = useState<SocialItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen]     = useState<{ quote: Quote; initial: { context: string; authorLine: string; authorBio: string; counterpoint: string } } | null>(null);
+  const [opening, setOpening] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    fetch("/api/admin/social-content", { headers: authHeaders() })
+      .then(r => r.json())
+      .then(d => setItems(d.items || []))
+      .catch(() => setItems([]))
+      .finally(() => setLoading(false));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  // Re-open a saved bundle: pull the full quote + the saved snapshots, so the modal
+  // re-renders the cards without calling the AI again.
+  const reopen = async (id: string) => {
+    setOpening(id);
+    try {
+      const [qr, sr] = await Promise.all([
+        fetch(`/api/quotes/${id}`).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(`/api/admin/social-content/${id}`, { headers: authHeaders() }).then(r => r.ok ? r.json() : null).catch(() => null),
+      ]);
+      if (!qr?.quote) { alert("Could not load the quote for this bundle."); return; }
+      const row = sr?.item || {};
+      setOpen({
+        quote: qr.quote,
+        initial: {
+          context: qr.quote.context || "",
+          authorLine: row.author_line || "",
+          authorBio: row.author_bio || "",
+          counterpoint: row.counterpoint || "",
+        },
+      });
+    } finally { setOpening(null); }
+  };
+
+  const remove = async (id: string) => {
+    if (!confirm("Remove this saved social content? The quote itself is not affected.")) return;
+    const r = await fetch(`/api/admin/social-content/${id}`, { method: "DELETE", headers: authHeaders() });
+    if (r.ok) setItems(prev => prev.filter(i => i.quote_id !== id));
+  };
+
+  return (
+    <div>
+      <div className="mb-6 space-y-1">
+        <h2 className="text-xl font-bold text-stone-900">Social Content</h2>
+        <p className="text-sm text-stone-400">
+          Saved 4-card bundles. Generate new ones from the <strong>Quotes</strong> tab (the
+          <ImageIcon className="w-3.5 h-3.5 inline mx-1" /> icon on any quote). Open a saved bundle to download again — no regeneration needed.
+        </p>
+      </div>
+
+      {loading ? (
+        <div className="space-y-3">{[...Array(4)].map((_, i) => <div key={i} className="h-16 bg-stone-100 rounded-xl animate-pulse" />)}</div>
+      ) : items.length === 0 ? (
+        <div className="text-center py-20">
+          <ImageIcon className="w-8 h-8 text-stone-200 mx-auto mb-3" />
+          <p className="text-stone-400 text-sm">No social content saved yet.</p>
+          <p className="text-stone-300 text-xs mt-1">Go to Quotes and click the image icon on a quote to create some.</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {items.map(it => (
+            <div key={it.quote_id} className="bg-white border border-stone-200 rounded-xl p-4 flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="font-serif italic text-sm text-stone-800 line-clamp-1">“{it.quote_text || it.quote_id}”</p>
+                <p className="text-xs text-stone-500 mt-0.5">
+                  {it.quote_author ? `— ${it.quote_author} · ` : ""}saved {new Date(it.updated_at).toLocaleDateString()}
+                </p>
+              </div>
+              <button
+                onClick={() => reopen(it.quote_id)}
+                disabled={opening === it.quote_id}
+                className="h-8 px-4 rounded-full text-xs font-semibold text-white disabled:opacity-50 flex items-center gap-1.5"
+                style={{ background: "#3D5A3E" }}
+              >
+                {opening === it.quote_id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                Open
+              </button>
+              <button
+                onClick={() => remove(it.quote_id)}
+                className="w-7 h-7 border border-red-100 rounded-full flex items-center justify-center text-red-400 hover:bg-red-50 hover:border-red-300 transition-colors"
+                title="Remove saved content"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {open && (
+        <SocialContentModal
+          quote={open.quote}
+          initial={open.initial}
+          onClose={() => setOpen(null)}
+        />
       )}
     </div>
   );
@@ -2806,11 +2927,12 @@ function MonetisationTab() {
   );
 }
 
-type Tab = "overview" | "quotes" | "authors" | "sources" | "tags" | "users" | "discussions" | "subscribers" | "ai" | "monetisation";
+type Tab = "overview" | "quotes" | "social" | "authors" | "sources" | "tags" | "users" | "discussions" | "subscribers" | "ai" | "monetisation";
 
 const TABS: { key: Tab; label: string; Icon: React.ElementType; adminOnly?: boolean }[] = [
   { key: "overview",      label: "Overview",      Icon: LayoutDashboard },
   { key: "quotes",        label: "Quotes",        Icon: QuoteIcon },
+  { key: "social",        label: "Social Content", Icon: ImageIcon },
   { key: "authors",       label: "Authors",       Icon: Users },
   { key: "sources",       label: "Sources",       Icon: BookOpen },
   { key: "tags",          label: "Tags",          Icon: Tag },
@@ -2956,6 +3078,7 @@ export default function ControlPage() {
         <main className="flex-1 px-5 md:px-8 py-8 max-w-5xl w-full mx-auto">
           {activeTab === "overview"     && <OverviewTab />}
           {activeTab === "quotes"       && <QuotesTab />}
+          {activeTab === "social"       && <SocialContentTab />}
           {activeTab === "authors"      && <AuthorsTab />}
           {activeTab === "sources"      && <SourcesTab />}
           {activeTab === "tags"         && <TagsTab />}

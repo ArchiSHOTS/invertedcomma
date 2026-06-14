@@ -149,6 +149,22 @@ export async function runMigrations() {
        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
      )`
   );
+  // Social Content: a saved 4-card bundle per quote (admin-generated). Stores only
+  // lightweight text snapshots; the card images re-render client-side on demand, so
+  // re-downloading never re-calls the AI (counterpoint is captured here).
+  await pool.query(
+    `CREATE TABLE IF NOT EXISTS social_content (
+       quote_id     TEXT PRIMARY KEY,
+       context      TEXT,
+       author_line  TEXT,
+       author_bio   TEXT,
+       counterpoint TEXT,
+       created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+       updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+     )`
+  );
+  // Added after initial release — backfills existing social_content rows.
+  await pool.query("ALTER TABLE social_content ADD COLUMN IF NOT EXISTS author_bio TEXT");
   console.log("[db] Migrations applied ✓");
 }
 
@@ -653,4 +669,63 @@ export async function toggleQuoteLike(userId: string, quoteId: string): Promise<
     await pool.query("INSERT INTO quote_likes (user_id, quote_id) VALUES ($1,$2)", [userId, quoteId]);
     return true;  // liked
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SOCIAL CONTENT (saved 4-card bundles, admin-generated)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface SocialContentRow {
+  quote_id: string;
+  context: string | null;
+  author_line: string | null;
+  author_bio: string | null;
+  counterpoint: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function upsertSocialContent(
+  quoteId: string,
+  fields: { context?: string; authorLine?: string; authorBio?: string; counterpoint?: string },
+) {
+  const { rows } = await pool.query<SocialContentRow>(
+    `INSERT INTO social_content (quote_id, context, author_line, author_bio, counterpoint)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (quote_id) DO UPDATE SET
+       context      = EXCLUDED.context,
+       author_line  = EXCLUDED.author_line,
+       author_bio   = EXCLUDED.author_bio,
+       counterpoint = EXCLUDED.counterpoint,
+       updated_at   = now()
+     RETURNING *`,
+    [quoteId, fields.context ?? null, fields.authorLine ?? null, fields.authorBio ?? null, fields.counterpoint ?? null],
+  );
+  return rows[0];
+}
+
+export async function getSocialContent(quoteId: string): Promise<SocialContentRow | null> {
+  const { rows } = await pool.query<SocialContentRow>(
+    "SELECT * FROM social_content WHERE quote_id=$1", [quoteId],
+  );
+  return rows[0] ?? null;
+}
+
+// Lightweight list for the dashboard: join to runtime_quotes for the headline text,
+// but seed quotes (not in runtime_quotes) keep just their id — the client fills the
+// rest from the loaded quote list it already has.
+export async function listSocialContent() {
+  const { rows } = await pool.query(
+    `SELECT sc.quote_id, sc.created_at, sc.updated_at,
+            rq.text AS quote_text, rq.author AS quote_author, rq.slug AS quote_slug
+       FROM social_content sc
+       LEFT JOIN runtime_quotes rq ON rq.id = sc.quote_id
+      ORDER BY sc.updated_at DESC`,
+  );
+  return rows;
+}
+
+export async function deleteSocialContent(quoteId: string): Promise<boolean> {
+  const { rowCount } = await pool.query("DELETE FROM social_content WHERE quote_id=$1", [quoteId]);
+  return (rowCount ?? 0) > 0;
 }
