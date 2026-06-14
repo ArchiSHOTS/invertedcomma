@@ -9,7 +9,7 @@ services:
     branch: main
     buildCommand: npm install && npm run build
     startCommand: npm start
-    healthCheckPath: /api/quotes
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
@@ -19,3 +19,14 @@ services:
         generateValue: true    # Render generates a strong random value
       - key: GEMINI_API_KEY
         sync: false            # set manually in dashboard (secret)
+
+  # Pings the live API every 10 minutes so the free web service never hits
+  # Render's ~15min idle spin-down — keeps cold starts (and splash.html) rare.
+  - type: cron
+    name: invertedcomma-keepalive
+    runtime: node
+    region: singapore
+    plan: free
+    schedule: "*/10 * * * *"
+    buildCommand: "true"
+    startCommand: "curl -sf https://www.invertedcomma.com/api/health || true"
