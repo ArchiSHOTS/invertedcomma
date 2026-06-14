@@ -20,13 +20,7 @@ services:
       - key: GEMINI_API_KEY
         sync: false            # set manually in dashboard (secret)
 
-  # Pings the live API every 10 minutes so the free web service never hits
-  # Render's ~15min idle spin-down — keeps cold starts (and splash.html) rare.
-  - type: cron
-    name: invertedcomma-keepalive
-    runtime: node
-    region: singapore
-    plan: free
-    schedule: "*/10 * * * *"
-    buildCommand: "true"
-    startCommand: "curl -sf https://www.invertedcomma.com/api/health || true"
+# Keep-alive: Render no longer offers a free Cron Job tier. Instead, an external
+# free scheduler (cron-job.org) pings /api/health every 10 minutes so this free
+# web service never hits Render's ~15min idle spin-down. Set up at cron-job.org —
+# no Render-side config needed.
