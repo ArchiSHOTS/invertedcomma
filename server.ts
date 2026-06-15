@@ -46,7 +46,7 @@ import {
   getUserById, getUserByEmail, getUserByHandle, getAllUsers,
   createUser, updateUser, deleteUser, toggleBookmark,
   getAuthorBySlug, getAllAuthors, upsertAuthor,
-  getRuntimeQuotes, getRuntimeQuoteBySlug, createRuntimeQuote,
+  getRuntimeQuotes, getRuntimeQuoteBySlug, getRuntimeQuoteEnrichment, createRuntimeQuote,
   updateRuntimeQuote, deleteRuntimeQuote, bulkSetRuntimeQuoteStatus, bulkEditRuntimeQuotes,
   getComments, createComment, likeComment, deleteComment, getAllComments,
   addSubscriber, getAllSubscribers, setSubscriberStatus,
@@ -1012,7 +1012,14 @@ app.post("/api/author/:slug/regenerate", adminMiddleware, async (req: any, res) 
 // ── Quotes endpoints ──────────────────────────────────────────────────────────
 
 app.get("/api/quotes", async (req, res) => {
-  const dbRQ = await getRuntimeQuotes("published");
+  // Degrade gracefully: if the DB read fails, still serve the code-backed seed
+  // quotes rather than blanking the page (or crashing on an async rejection).
+  let dbRQ: Awaited<ReturnType<typeof getRuntimeQuotes>> = [];
+  try {
+    dbRQ = await getRuntimeQuotes("published");
+  } catch (e: any) {
+    console.error("[quotes] DB read failed, serving seed quotes only:", e?.message);
+  }
   res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
   res.json({ quotes: [...getEnrichedQuotes(), ...dbRQ] });
 });
@@ -1031,7 +1038,15 @@ app.get("/api/quotes/:slugOrId", async (req, res) => {
   const seed  = getEnrichedQuotes();
   const seedQ = seed.find((q) => q.slug === slugOrId || q.id === slugOrId);
   if (seedQ) return res.json({ quote: seedQ });
-  const rq = await getRuntimeQuoteBySlug(slugOrId);
+  // Serve runtime quotes from the cached list (5-min TTL, no enrichment JSONB).
+  // The detail page never reads `enrichment` — insights are fetched separately —
+  // so this avoids an uncached SELECT * (incl. the heavy JSONB) on every view.
+  let rq: any = null;
+  try {
+    rq = (await getRuntimeQuotes()).find((q: any) => q.slug === slugOrId || q.id === slugOrId);
+  } catch (e: any) {
+    console.error("[quote] DB read failed:", e?.message);
+  }
   if (!rq)  return res.status(404).json({ error: "Quote not found" });
   res.json({ quote: rq });
 });
@@ -1613,12 +1628,19 @@ app.get("/api/debug/ai", async (_req, res) => {
 app.get("/api/quotes/:quoteId/insights", async (req, res) => {
   const { quoteId } = req.params;
   const allSeed     = getEnrichedQuotes();
-  const runtimeQ    = await getRuntimeQuoteBySlug(quoteId);
-  const quote       = allSeed.find((q: any) => q.id === quoteId) ?? runtimeQ;
+  const seedQ       = allSeed.find((q: any) => q.id === quoteId);
+  // Resolve runtime quotes from the cached list (no enrichment) to avoid a
+  // SELECT * on every insights request/poll.
+  const runtimeQ    = seedQ ? null : (await getRuntimeQuotes()).find((q: any) => q.id === quoteId || q.slug === quoteId);
+  const quote       = seedQ ?? runtimeQ;
   if (!quote) return res.status(404).json({ error: "Quote not found" });
 
-  // Runtime quote: return inline enrichment if available
-  if (runtimeQ?.enrichment) return res.json(runtimeQ.enrichment);
+  // Runtime quote: return inline enrichment if available. Pull ONLY the
+  // enrichment column (not the whole row) so repeated polls stay cheap.
+  if (runtimeQ) {
+    const enrichment = await getRuntimeQuoteEnrichment(quote.id);
+    if (enrichment) return res.json(enrichment);
+  }
 
   // DB insights cache
   const cached = await getInsight(quoteId);
@@ -1634,7 +1656,7 @@ app.get("/api/quotes/:quoteId/insights", async (req, res) => {
       return res.json({ authorBio: null, quoteMeaning: null, historicalContext: null, relatedWorks: [], webReferences: [] });
     }
     if (runtimeQ) {
-      await updateRuntimeQuote(quoteId, { enrichment });
+      await updateRuntimeQuote(quote.id, { enrichment });
     } else {
       await setInsight(quoteId, enrichment);
     }
@@ -1803,7 +1825,13 @@ app.put("/api/admin/quotes/:quoteId/anatomy", adminMiddleware, async (req, res) 
 
 // Public: ids of quotes that have an enabled anatomy — powers the "has anatomy" badge on cards.
 app.get("/api/anatomies/ids", async (_req, res) => {
-  res.json({ ids: await getAnatomyQuoteIds() });
+  try {
+    res.json({ ids: await getAnatomyQuoteIds() });
+    return;
+  } catch (e: any) {
+    console.error("[anatomies/ids] DB read failed, returning empty set:", e?.message);
+    res.json({ ids: [] });
+  }
 });
 
 // ── OG Image generation ───────────────────────────────────────────────────────
@@ -2170,14 +2198,28 @@ async function ensureAdmin() {
   console.log(`[auth] Created admin ${ADMIN_EMAIL}.`);
 }
 
+// ── Crash safety net ──────────────────────────────────────────────────────────
+// Express 4 doesn't catch rejections from async route handlers, so a single
+// failed DB query would otherwise take the whole process down. Log loudly and
+// stay alive — one bad request must never kill the server for everyone.
+process.on("unhandledRejection", (reason: any) => {
+  console.error("[unhandledRejection]", reason?.message || reason);
+});
+
 // ── Server startup ────────────────────────────────────────────────────────────
 async function startServer() {
-  // Connect to database + apply idempotent migrations
-  await testConnection();
-  await runMigrations();
-
-  // Ensure the admin account from env (ADMIN_EMAIL / ADMIN_PASSWORD).
-  await ensureAdmin();
+  // Connect to database + apply idempotent migrations. In production this must
+  // succeed; in dev we tolerate an unreachable DB so the SPA and code-backed
+  // endpoints (e.g. seed quotes) still serve for frontend work without Neon.
+  try {
+    await testConnection();
+    await runMigrations();
+    // Ensure the admin account from env (ADMIN_EMAIL / ADMIN_PASSWORD).
+    await ensureAdmin();
+  } catch (err: any) {
+    if (IS_PROD) throw err;
+    console.warn(`[db] Unavailable — starting in DB-less dev mode. DB-backed routes will fail. (${err?.message})`);
+  }
 
   let renderShell: (url: string) => Promise<string>;
 

@@ -402,6 +402,16 @@ export async function getRuntimeQuoteBySlug(slug: string) {
   return rows[0] ?? null;
 }
 
+// Fetch ONLY the enrichment JSONB for one quote. The insights endpoint is the
+// sole consumer that needs enrichment; pulling just this column (instead of
+// SELECT *) keeps repeated insight reads/polls off the Neon bandwidth budget.
+export async function getRuntimeQuoteEnrichment(idOrSlug: string) {
+  const { rows } = await pool.query(
+    "SELECT enrichment FROM runtime_quotes WHERE slug=$1 OR id=$1", [idOrSlug]
+  );
+  return rows[0]?.enrichment ?? null;
+}
+
 export async function createRuntimeQuote(q: any) {
   const { rows } = await pool.query(
     `INSERT INTO runtime_quotes

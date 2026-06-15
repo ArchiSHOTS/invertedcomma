@@ -244,10 +244,16 @@ export default function QuotePage() {
       }
     } catch {}
     // Not ready yet — show skeleton briefly then switch to "being generated" state,
-    // and poll every 8 seconds until enrichment lands
+    // and poll a few times while enrichment is generated. Bounded on purpose:
+    // an unbounded loop hammered /insights every 8s forever when a quote never
+    // produced an authorBio (AI disabled/failing), which was a major Neon
+    // bandwidth sink. After MAX_POLLS we give up; a refresh re-attempts.
     setIsLoadingInsights(false);
+    const MAX_POLLS = 6;
+    let attempts = 0;
     const poll = () => {
       insightsPollRef.current = setTimeout(async () => {
+        attempts++;
         try {
           const r = await fetch(`/api/quotes/${id}/insights`);
           if (r.ok) {
@@ -255,8 +261,8 @@ export default function QuotePage() {
             if (d.authorBio) { setInsights(d); return; }
           }
         } catch {}
-        poll();
-      }, 8000);
+        if (attempts < MAX_POLLS) poll();
+      }, 10000);
     };
     poll();
   };
