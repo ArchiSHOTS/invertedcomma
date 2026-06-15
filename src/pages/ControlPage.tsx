@@ -2192,86 +2192,203 @@ function SubscribersTab() {
 }
 
 // ── AI tab ────────────────────────────────────────────────────────────────────
+type AIConfig = {
+  provider: "gemini" | "openai";
+  geminiModel: string;
+  openaiModel: string;
+  gemini: { set: boolean; last4: string };
+  openai: { set: boolean; last4: string };
+  ready: boolean;
+  geminiModels: string[];
+  defaultOpenaiModel: string;
+};
+
+const PROVIDER_META: Record<"gemini" | "openai", { name: string; org: string; note: string }> = {
+  gemini: { name: "Google Gemini", org: "Google",  note: "Free tier: 20 req/day per model. Supports web-grounded sources." },
+  openai: { name: "GPT-4o mini",   org: "OpenAI",  note: "Paid (no free tier). No built-in web grounding, so counterpoints/insights won't include source links." },
+};
+
 function AITab() {
-  const models = [
-    { name: "Gemini 2.5 Flash", provider: "Google", inputCost: "$0.075/1M", outputCost: "$0.30/1M", freeTier: "1,500 req/day", status: "active" },
-    { name: "GPT-4o Mini", provider: "OpenAI", inputCost: "$0.15/1M", outputCost: "$0.60/1M", freeTier: "None", status: "available" },
-    { name: "Claude Haiku 3.5", provider: "Anthropic", inputCost: "$0.80/1M", outputCost: "$4.00/1M", freeTier: "None", status: "available" },
-    { name: "Llama 3.1 8B (Groq)", provider: "Groq", inputCost: "~$0.05/1M", outputCost: "~$0.08/1M", freeTier: "Rate-limited", status: "available" },
-  ];
-  const useCases = [
-    { task: "AI Counterpoint", model: "Gemini 2.5 Flash", tokens: "~400/req", cost: "~$0.03 per 1k uses" },
-    { task: "YouTube Extraction", model: "Gemini 2.5 Flash", tokens: "~2,000/req", cost: "~$0.15 per 100 videos" },
-    { task: "Text/Article Extraction", model: "Gemini 2.5 Flash", tokens: "~1,500/req", cost: "~$0.11 per 100 articles" },
-    { task: "Author Insights", model: "Gemini 2.5 Flash", tokens: "~800/req", cost: "~$0.06 per 1k quotes" },
-  ];
+  const [cfg, setCfg] = useState<AIConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [provider, setProvider] = useState<"gemini" | "openai">("gemini");
+  const [geminiKey, setGeminiKey] = useState("");
+  const [openaiKey, setOpenaiKey] = useState("");
+  const [geminiModel, setGeminiModel] = useState("");
+  const [openaiModel, setOpenaiModel] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const load = () => {
+    setLoading(true);
+    fetch("/api/admin/ai-config", { headers: authHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then((d: AIConfig | null) => {
+        if (!d || !d.provider) return;
+        setCfg(d);
+        setProvider(d.provider);
+        setGeminiModel(d.geminiModel || "");
+        setOpenaiModel(d.openaiModel || d.defaultOpenaiModel);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  };
+  useEffect(load, []);
+
+  const save = async () => {
+    setSaving(true);
+    setTestResult(null);
+    try {
+      const body: Record<string, string> = { provider, geminiModel, openaiModel };
+      if (geminiKey.trim()) body.geminiKey = geminiKey.trim();
+      if (openaiKey.trim()) body.openaiKey = openaiKey.trim();
+      const res = await fetch("/api/admin/ai-config", {
+        method: "PUT", headers: authHeaders(), body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        setGeminiKey(""); setOpenaiKey("");
+        setSavedAt(true); setTimeout(() => setSavedAt(false), 2500);
+        load();
+      }
+    } finally { setSaving(false); }
+  };
+
+  const runTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch("/api/admin/ai-config/test", { method: "POST", headers: authHeaders() });
+      const d = await res.json();
+      setTestResult({ ok: !!d.ok, text: d.ok ? `${d.provider}: ${d.response || "OK"}` : (d.reason || "Test failed") });
+    } catch {
+      setTestResult({ ok: false, text: "Network error" });
+    } finally { setTesting(false); }
+  };
+
+  if (loading || !cfg) {
+    return <div className="py-16 text-center text-sm text-stone-400">Loading AI configuration…</div>;
+  }
+
+  const activeKeySet = provider === "openai" ? cfg.openai.set : cfg.gemini.set;
+  const dirty = provider !== cfg.provider
+    || geminiModel !== (cfg.geminiModel || "")
+    || openaiModel !== (cfg.openaiModel || cfg.defaultOpenaiModel)
+    || !!geminiKey.trim() || !!openaiKey.trim();
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 max-w-3xl">
       <div>
-        <h2 className="text-xl font-bold text-stone-900">AI Management</h2>
-        <p className="text-xs text-stone-500 mt-0.5">Model configuration, cost estimates, and feature toggles</p>
+        <h2 className="text-xl font-bold text-stone-900">AI Provider</h2>
+        <p className="text-xs text-stone-500 mt-0.5">Choose which AI powers Deep Dives, counterpoints, author bios and extraction — and manage API keys. Changes apply immediately.</p>
       </div>
 
-      <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5">
-        <p className="text-xs font-bold text-emerald-800 uppercase tracking-wider mb-1">Free-tier cost estimate</p>
-        <p className="text-sm text-emerald-700">At 10,000 active users/month with Gemini 2.5 Flash free tier: <strong>~$0 in AI costs</strong> up to 1,500 requests/day. Beyond that: ~$1–5/month at typical usage.</p>
+      {/* Provider picker */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {(["gemini", "openai"] as const).map(p => {
+          const meta = PROVIDER_META[p];
+          const keySet = p === "openai" ? cfg.openai.set : cfg.gemini.set;
+          const active = provider === p;
+          return (
+            <button
+              key={p}
+              onClick={() => setProvider(p)}
+              className={`text-left p-4 rounded-2xl border transition-all ${active ? "border-stone-900 bg-stone-50 ring-1 ring-stone-900" : "border-stone-200 bg-white hover:border-stone-300"}`}
+            >
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-bold text-stone-800">{meta.name}</p>
+                {active && <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-full bg-stone-900 text-white">Selected</span>}
+              </div>
+              <p className="text-[10px] text-stone-400 mb-2">{meta.org}</p>
+              <p className="text-[11px] text-stone-500 leading-relaxed">{meta.note}</p>
+              <p className={`text-[10px] font-bold mt-2 ${keySet ? "text-emerald-600" : "text-amber-600"}`}>
+                {keySet ? "● API key set" : "○ No API key"}
+              </p>
+            </button>
+          );
+        })}
       </div>
 
-      <div>
-        <p className="text-[10px] font-bold uppercase tracking-widest text-stone-400 mb-3">Active model</p>
-        <div className="space-y-2">
-          {models.map(m => (
-            <div key={m.name} className={`flex flex-wrap items-center gap-4 p-4 border rounded-2xl ${m.status === "active" ? "border-stone-900 bg-stone-50" : "border-stone-200 bg-white"}`}>
-              <div className="flex items-center gap-2 min-w-[160px]">
-                {m.status === "active" && <span className="w-2 h-2 bg-emerald-500 rounded-full" />}
-                <div>
-                  <p className="text-sm font-bold text-stone-800">{m.name}</p>
-                  <p className="text-[10px] text-stone-400">{m.provider}</p>
-                </div>
-              </div>
-              <div className="flex gap-4 text-[10px] font-mono text-stone-500 flex-wrap">
-                <span>In: {m.inputCost}</span>
-                <span>Out: {m.outputCost}</span>
-                <span className="text-emerald-600">Free: {m.freeTier}</span>
-              </div>
-              <span className={`ml-auto text-[9px] font-bold uppercase px-2 py-1 rounded-full ${m.status === "active" ? "bg-stone-900 text-white" : "bg-stone-100 text-stone-500"}`}>
-                {m.status === "active" ? "● Active" : "Available"}
-              </span>
+      {/* Active provider key + model */}
+      <div className="bg-white border border-stone-200 rounded-2xl p-5 space-y-5">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-stone-400">
+          {PROVIDER_META[provider].name} settings
+        </p>
+
+        {provider === "gemini" ? (
+          <>
+            <div>
+              <label className="block text-xs font-medium text-stone-600 mb-1">API key</label>
+              <input
+                type="password" autoComplete="off"
+                value={geminiKey} onChange={e => setGeminiKey(e.target.value)}
+                placeholder={cfg.gemini.set ? `•••••••• ${cfg.gemini.last4} (leave blank to keep)` : "Paste your Gemini API key"}
+                className="w-full bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-stone-300"
+              />
+              <p className="text-[10px] text-stone-400 mt-1">Get one at aistudio.google.com/app/apikey</p>
             </div>
-          ))}
+            <div>
+              <label className="block text-xs font-medium text-stone-600 mb-1">Model</label>
+              <select
+                value={geminiModel} onChange={e => setGeminiModel(e.target.value)}
+                className="w-full bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-300"
+              >
+                <option value="">Auto (try {cfg.geminiModels.join(" → ")})</option>
+                {cfg.geminiModels.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+          </>
+        ) : (
+          <>
+            <div>
+              <label className="block text-xs font-medium text-stone-600 mb-1">API key</label>
+              <input
+                type="password" autoComplete="off"
+                value={openaiKey} onChange={e => setOpenaiKey(e.target.value)}
+                placeholder={cfg.openai.set ? `•••••••• ${cfg.openai.last4} (leave blank to keep)` : "Paste your OpenAI API key (sk-…)"}
+                className="w-full bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-stone-300"
+              />
+              <p className="text-[10px] text-stone-400 mt-1">Get one at platform.openai.com/api-keys</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-stone-600 mb-1">Model</label>
+              <input
+                value={openaiModel} onChange={e => setOpenaiModel(e.target.value)}
+                placeholder={cfg.defaultOpenaiModel}
+                className="w-full bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-stone-300"
+              />
+              <p className="text-[10px] text-stone-400 mt-1">e.g. gpt-4o-mini, gpt-4o</p>
+            </div>
+          </>
+        )}
+
+        <div className="flex flex-wrap items-center gap-3 pt-1">
+          <button
+            onClick={save} disabled={saving || !dirty}
+            className="h-9 px-5 rounded-full text-sm font-semibold text-white bg-stone-900 hover:bg-stone-800 disabled:opacity-40 transition-colors"
+          >
+            {saving ? "Saving…" : "Save changes"}
+          </button>
+          <button
+            onClick={runTest} disabled={testing || !activeKeySet}
+            className="h-9 px-5 rounded-full text-sm font-semibold border border-stone-300 text-stone-700 hover:bg-stone-50 disabled:opacity-40 transition-colors"
+            title={activeKeySet ? "Send a tiny test request to the active provider" : "Set and save an API key first"}
+          >
+            {testing ? "Testing…" : "Test connection"}
+          </button>
+          {savedAt && <span className="text-xs font-medium text-emerald-600">✓ Saved</span>}
+          {testResult && (
+            <span className={`text-xs font-medium ${testResult.ok ? "text-emerald-600" : "text-red-500"}`}>
+              {testResult.ok ? "✓ " : "✕ "}{testResult.text}
+            </span>
+          )}
         </div>
       </div>
 
-      <div>
-        <p className="text-[10px] font-bold uppercase tracking-widest text-stone-400 mb-3">Cost by feature</p>
-        <div className="bg-white border border-stone-200 rounded-2xl overflow-x-auto">
-          <table className="w-full min-w-[560px] text-xs">
-            <thead>
-              <tr className="border-b border-stone-100 bg-stone-50">
-                {["Feature", "Model", "Avg tokens", "Est. cost"].map(h => (
-                  <th key={h} className="text-left px-4 py-3 font-bold text-stone-400 uppercase tracking-wider text-[10px]">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-stone-100">
-              {useCases.map(uc => (
-                <tr key={uc.task} className="hover:bg-stone-50">
-                  <td className="px-4 py-3 font-medium text-stone-700">{uc.task}</td>
-                  <td className="px-4 py-3 text-stone-500">{uc.model}</td>
-                  <td className="px-4 py-3 font-mono text-stone-400">{uc.tokens}</td>
-                  <td className="px-4 py-3 font-mono font-bold text-emerald-600">{uc.cost}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="bg-stone-50 border border-stone-200 rounded-2xl p-5">
-        <p className="text-sm font-bold text-stone-800 mb-1">To switch AI provider</p>
-        <p className="text-xs text-stone-500">In <code className="bg-white border border-stone-200 px-1.5 py-0.5 rounded text-stone-700">server.ts</code>, replace the Gemini client initialisation. All API endpoints are provider-agnostic.</p>
-      </div>
+      <p className="text-[11px] text-stone-400 leading-relaxed">
+        Keys are stored server-side and never shown again after saving (only the last 4 digits). The selected provider and keys override any <code className="bg-stone-100 px-1 py-0.5 rounded">GEMINI_API_KEY</code> / <code className="bg-stone-100 px-1 py-0.5 rounded">OPENAI_API_KEY</code> set in the environment.
+      </p>
     </div>
   );
 }

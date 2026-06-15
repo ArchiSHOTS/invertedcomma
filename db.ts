@@ -165,6 +165,21 @@ export async function runMigrations() {
   );
   // Added after initial release — backfills existing social_content rows.
   await pool.query("ALTER TABLE social_content ADD COLUMN IF NOT EXISTS author_bio TEXT");
+  // AI provider configuration — a single row (id=1) the admin sets from the
+  // dashboard. Lets us switch provider (Gemini/OpenAI) and rotate API keys at
+  // runtime, overriding the env-var defaults, without a redeploy.
+  await pool.query(
+    `CREATE TABLE IF NOT EXISTS ai_config (
+       id           INTEGER PRIMARY KEY DEFAULT 1,
+       provider     TEXT NOT NULL DEFAULT 'gemini',
+       gemini_key   TEXT,
+       openai_key   TEXT,
+       gemini_model TEXT,
+       openai_model TEXT,
+       updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+       CONSTRAINT ai_config_singleton CHECK (id = 1)
+     )`
+  );
   console.log("[db] Migrations applied ✓");
 }
 
@@ -639,6 +654,55 @@ export async function setInsight(quoteId: string, data: object) {
      ON CONFLICT (quote_id) DO UPDATE SET data=EXCLUDED.data, created_at=now()`,
     [quoteId, JSON.stringify(data)]
   );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI CONFIG (admin-set provider + API keys; singleton row id=1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface AIConfigRow {
+  provider: string;
+  gemini_key: string | null;
+  openai_key: string | null;
+  gemini_model: string | null;
+  openai_model: string | null;
+  updated_at: string;
+}
+
+export async function getAIConfig(): Promise<AIConfigRow | null> {
+  const { rows } = await pool.query<AIConfigRow>("SELECT * FROM ai_config WHERE id = 1");
+  return rows[0] ?? null;
+}
+
+// Partial update — only the provided fields change (undefined = leave as-is),
+// so rotating one key never wipes the other.
+export async function upsertAIConfig(fields: {
+  provider?: string;
+  geminiKey?: string;
+  openaiKey?: string;
+  geminiModel?: string;
+  openaiModel?: string;
+}): Promise<AIConfigRow> {
+  const { rows } = await pool.query<AIConfigRow>(
+    `INSERT INTO ai_config (id, provider, gemini_key, openai_key, gemini_model, openai_model, updated_at)
+     VALUES (1, COALESCE($1,'gemini'), $2, $3, $4, $5, now())
+     ON CONFLICT (id) DO UPDATE SET
+       provider     = COALESCE($1, ai_config.provider),
+       gemini_key   = COALESCE($2, ai_config.gemini_key),
+       openai_key   = COALESCE($3, ai_config.openai_key),
+       gemini_model = COALESCE($4, ai_config.gemini_model),
+       openai_model = COALESCE($5, ai_config.openai_model),
+       updated_at   = now()
+     RETURNING *`,
+    [
+      fields.provider ?? null,
+      fields.geminiKey ?? null,
+      fields.openaiKey ?? null,
+      fields.geminiModel ?? null,
+      fields.openaiModel ?? null,
+    ],
+  );
+  return rows[0];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

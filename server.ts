@@ -21,6 +21,7 @@ try {
 } catch { console.warn("[og] @napi-rs/canvas not available — OG images will 404"); }
 
 import { GoogleGenAI } from "@google/genai";
+import OpenAI from "openai";
 import { createServer as createViteServer } from "vite";
 import { getEnrichedQuotes, AVAILABLE_TAGS } from "./src/data/quotes.ts";
 import { DiscussionStore, Comment } from "./src/types.ts";
@@ -55,6 +56,7 @@ import {
   getAnatomy, upsertAnatomy, getAnatomyQuoteIds,
   toggleQuoteLike,
   upsertSocialContent, getSocialContent, listSocialContent, deleteSocialContent,
+  getAIConfig, upsertAIConfig,
 } from "./db.ts";
 import { sendVerificationEmail, sendWelcomeEmail, sendSubscriberWelcomeEmail, type WelcomeQuote } from "./email.ts";
 import { importWikiquote, importStatus } from "./wikiquote.ts";
@@ -251,33 +253,80 @@ if (IS_PROD && process.env.JWT_SECRET === "ic-dev-secret-change-in-production") 
   process.exit(1);
 }
 
-// ── Gemini AI ─────────────────────────────────────────────────────────────────
-const apiKey = process.env.GEMINI_API_KEY;
-let aiClient: GoogleGenAI | null = null;
+// ── AI providers (Gemini / OpenAI) ────────────────────────────────────────────
+// The active provider + API keys live in the `ai_config` DB row (admin-set from
+// the dashboard) and override the env-var defaults. Both can be rotated at
+// runtime via rebuildAIClients() — no redeploy needed.
+type AIProvider = "gemini" | "openai";
+const GEMINI_MODELS = ["gemini-2.5-flash-lite", "gemini-2.5-flash"];
+const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
 
-if (apiKey) {
-  aiClient = new GoogleGenAI({ apiKey });
-  console.log(`[Gemini] API key loaded (${apiKey.slice(0, 8)}…${apiKey.slice(-4)})`);
-} else {
-  console.warn("[Gemini] No GEMINI_API_KEY found in environment — AI features disabled.");
+const aiConfig = {
+  provider:    "gemini" as AIProvider,
+  geminiKey:   process.env.GEMINI_API_KEY || "",
+  openaiKey:   process.env.OPENAI_API_KEY || "",
+  geminiModel: "",                       // "" → use the GEMINI_MODELS fallback chain
+  openaiModel: DEFAULT_OPENAI_MODEL,
+};
+
+let geminiClient: GoogleGenAI | null = null;
+let openaiClient: OpenAI | null = null;
+
+function rebuildAIClients() {
+  geminiClient = aiConfig.geminiKey ? new GoogleGenAI({ apiKey: aiConfig.geminiKey }) : null;
+  openaiClient = aiConfig.openaiKey ? new OpenAI({ apiKey: aiConfig.openaiKey }) : null;
+}
+rebuildAIClients();
+
+// Is the *currently selected* provider usable?
+function aiReady(): boolean {
+  return aiConfig.provider === "openai" ? !!openaiClient : !!geminiClient;
 }
 
-const MODELS = ["gemini-2.5-flash-lite", "gemini-2.5-flash"];
+// Load persisted config from the DB (overrides env) at startup, and whenever
+// the admin saves new settings.
+async function loadAIConfig() {
+  try {
+    const row = await getAIConfig();
+    if (row) {
+      if (row.provider === "gemini" || row.provider === "openai") aiConfig.provider = row.provider;
+      if (row.gemini_key)   aiConfig.geminiKey   = row.gemini_key;
+      if (row.openai_key)   aiConfig.openaiKey   = row.openai_key;
+      if (row.gemini_model) aiConfig.geminiModel = row.gemini_model;
+      if (row.openai_model) aiConfig.openaiModel = row.openai_model;
+      rebuildAIClients();
+    }
+  } catch (e: any) {
+    console.warn("[ai] config load failed (using env defaults):", e?.message);
+  }
+  console.log(`[ai] provider=${aiConfig.provider} · gemini=${geminiClient ? "✓" : "✗"} · openai=${openaiClient ? "✓" : "✗"}`);
+}
 
+// Unified generate. Returns a normalised object with `.text` and `.candidates`
+// so every existing caller (which reads response.text / groundingChunks) works
+// against either provider. OpenAI has no built-in web grounding, so its
+// candidates are empty (no sources) — callers degrade to model-supplied links.
 async function generateWithFallback(
   contents: string | any[],
   config: Record<string, any> = {},
-  models: string[] = MODELS
 ): Promise<any> {
-  if (!aiClient) throw new Error("No AI client");
+  return aiConfig.provider === "openai"
+    ? generateOpenAI(contents, config)
+    : generateGemini(contents, config);
+}
+
+async function generateGemini(contents: string | any[], config: Record<string, any>): Promise<any> {
+  if (!geminiClient) throw new Error("No Gemini client");
+  const models = aiConfig.geminiModel ? [aiConfig.geminiModel] : GEMINI_MODELS;
   let lastErr: any;
   for (const model of models) {
     try {
-      const res = await aiClient.models.generateContent({ model, contents, config });
+      const res = await geminiClient.models.generateContent({ model, contents, config });
       if (models.indexOf(model) > 0) console.log(`[Gemini] Used fallback model: ${model}`);
       return res;
     } catch (err: any) {
-      const status = JSON.parse(err.message || "{}").error?.code;
+      let status: number | undefined;
+      try { status = JSON.parse(err.message || "{}").error?.code; } catch {}
       if (status === 503 || status === 429) {
         console.warn(`[Gemini] ${model} unavailable (${status}), trying next...`);
         lastErr = err;
@@ -287,6 +336,33 @@ async function generateWithFallback(
     }
   }
   throw lastErr;
+}
+
+async function generateOpenAI(contents: string | any[], config: Record<string, any>): Promise<any> {
+  if (!openaiClient) throw new Error("No OpenAI client");
+  let prompt = Array.isArray(contents)
+    ? contents.map((c: any) => (typeof c === "string" ? c : c?.text || "")).join("\n")
+    : String(contents);
+  const wantJson = config.responseMimeType === "application/json";
+  // OpenAI's JSON mode requires the word "json" somewhere in the messages.
+  if (wantJson && !/json/i.test(prompt)) prompt += "\n\nRespond with a single JSON object.";
+  try {
+    const resp = await openaiClient.chat.completions.create({
+      model: aiConfig.openaiModel || DEFAULT_OPENAI_MODEL,
+      messages: [{ role: "user", content: prompt }],
+      temperature: typeof config.temperature === "number" ? config.temperature : 0.7,
+      ...(wantJson ? { response_format: { type: "json_object" } } : {}),
+    });
+    return { text: resp.choices?.[0]?.message?.content || "", candidates: [] };
+  } catch (err: any) {
+    // Normalise OpenAI's status onto the shape isQuotaError()/aiError() parse,
+    // so quota/rate-limit handling is identical across providers.
+    const code = err?.status || err?.code;
+    if (code === 429 || code === 503) {
+      throw new Error(JSON.stringify({ error: { code: Number(code) || 429 } }));
+    }
+    throw err;
+  }
 }
 
 // True when a Gemini error is a quota / rate-limit exhaustion (free-tier daily
@@ -306,6 +382,10 @@ function aiError(err: any): { status: number; message: string } {
   try { code = JSON.parse(raw).error?.code; } catch {}
   if (isQuotaError(err)) {
     return { status: 429, message: "Our AI has reached today's usage limit. Please try again later." };
+  }
+  // Bad/rejected API key (OpenAI throws status 401; Gemini reports 400 INVALID_ARGUMENT).
+  if (err?.status === 401 || code === 401 || /invalid_api_key|API key not valid|API_KEY_INVALID/i.test(raw)) {
+    return { status: 401, message: "The API key was rejected. Check the key for the selected provider." };
   }
   if (code === 503 || /UNAVAILABLE|overloaded/i.test(raw)) {
     return { status: 503, message: "The AI service is busy right now. Please try again in a moment." };
@@ -361,7 +441,7 @@ interface QuoteEnrichment {
 }
 
 async function enrichQuoteWithAI(quote: any): Promise<QuoteEnrichment | null> {
-  if (!aiClient) return null;
+  if (!aiReady()) return null;
   const sourceInfo = quote.source ? `\nSource: "${quote.source}"` : "";
   const yearInfo   = quote.year   ? `\nYear: ${quote.year}` : "";
 
@@ -427,7 +507,7 @@ function authorSlug(name: string): string {
 }
 
 async function generateAuthorProfile(name: string): Promise<any | null> {
-  if (!aiClient) return null;
+  if (!aiReady()) return null;
   const prompt = `You are a biographical research assistant. Generate a concise but rich profile for the person: "${name}".
 
 Return ONLY a JSON object:
@@ -1411,7 +1491,7 @@ app.post("/api/discussions/:quoteId/ai-counterpoint", async (req, res) => {
   const cached = await getInsight(`cp:${quoteId}`);
   if (cached) return res.json(cached);
 
-  if (!aiClient) {
+  if (!aiReady()) {
     const fallback = `Under a critical lens, this quote by ${author} proposes a singular path that glosses over contextual diversity.`;
     const data = { aiCounterpoint: fallback, sources: [] };
     await setInsight(`cp:${quoteId}`, data);
@@ -1490,7 +1570,7 @@ app.post("/api/admin/extract-youtube", adminMiddleware, async (req, res) => {
   if (!url) return res.status(400).json({ error: "YouTube URL required" });
   const videoId = extractYouTubeId(url);
   if (!videoId) return res.status(400).json({ error: "Could not parse YouTube video ID from URL" });
-  if (!aiClient) return res.status(503).json({ error: "AI client not configured. Set GEMINI_API_KEY in .env" });
+  if (!aiReady()) return res.status(503).json({ error: "AI is not configured. Set a provider + API key in the dashboard AI tab." });
 
   try {
     // oEmbed gives us a reliable title + uploading channel for grounding, regardless of
@@ -1607,7 +1687,7 @@ Extract up to 10 quotes. Use 0 for startSeconds/endSeconds if timestamps are unk
 app.post("/api/admin/extract-text", adminMiddleware, async (req, res) => {
   const { text } = req.body;
   if (!text || text.trim().length < 50) return res.status(400).json({ error: "Paste at least 50 characters of text" });
-  if (!aiClient) return res.status(503).json({ error: "AI client not configured. Set GEMINI_API_KEY in .env" });
+  if (!aiReady()) return res.status(503).json({ error: "AI is not configured. Set a provider + API key in the dashboard AI tab." });
 
   try {
     const prompt = `You are a quote extraction expert. Extract all notable, insightful, or memorable quotes from the following text.
@@ -1643,12 +1723,78 @@ Extract 3-15 quotes. Return ONLY the JSON array.`;
 
 // ── Debug ─────────────────────────────────────────────────────────────────────
 app.get("/api/debug/ai", async (_req, res) => {
-  if (!aiClient) return res.json({ ok: false, reason: "No GEMINI_API_KEY in environment" });
+  if (!aiReady()) return res.json({ ok: false, reason: `No API key for active provider (${aiConfig.provider})` });
   try {
-    const r = await generateWithFallback("Say 'Gemini is working' in exactly 4 words.", { temperature: 0 });
-    res.json({ ok: true, response: r.text?.trim() });
+    const r = await generateWithFallback("Say 'AI is working' in exactly 4 words.", { temperature: 0 });
+    res.json({ ok: true, provider: aiConfig.provider, response: r.text?.trim() });
   } catch (err: any) {
-    res.json({ ok: false, reason: err.message });
+    res.json({ ok: false, provider: aiConfig.provider, reason: aiError(err).message });
+  }
+});
+
+// ── Admin: AI provider configuration ──────────────────────────────────────────
+// API keys are never returned to the client — only a masked "set + last 4".
+function maskKey(k: string) {
+  return k ? { set: true, last4: k.slice(-4) } : { set: false, last4: "" };
+}
+
+app.get("/api/admin/ai-config", adminMiddleware, (_req, res) => {
+  res.json({
+    provider:    aiConfig.provider,
+    geminiModel: aiConfig.geminiModel || "",
+    openaiModel: aiConfig.openaiModel || DEFAULT_OPENAI_MODEL,
+    gemini:      maskKey(aiConfig.geminiKey),
+    openai:      maskKey(aiConfig.openaiKey),
+    ready:       aiReady(),
+    geminiModels:       GEMINI_MODELS,
+    defaultOpenaiModel: DEFAULT_OPENAI_MODEL,
+  });
+});
+
+const AIConfigSchema = z.object({
+  provider:    z.enum(["gemini", "openai"]).optional(),
+  geminiKey:   z.string().trim().max(200).optional(),
+  openaiKey:   z.string().trim().max(200).optional(),
+  geminiModel: z.string().trim().max(80).optional(),
+  openaiModel: z.string().trim().max(80).optional(),
+});
+
+app.put("/api/admin/ai-config", adminMiddleware, validate(AIConfigSchema), async (req: any, res) => {
+  const body = req.validated as z.infer<typeof AIConfigSchema>;
+  // Blank key fields mean "leave unchanged" (the UI never echoes the saved key
+  // back, so an untouched field arrives empty). Model fields may be cleared.
+  const fields: Parameters<typeof upsertAIConfig>[0] = {};
+  if (body.provider)               fields.provider    = body.provider;
+  if (body.geminiKey)              fields.geminiKey   = body.geminiKey;
+  if (body.openaiKey)              fields.openaiKey   = body.openaiKey;
+  if (body.geminiModel !== undefined) fields.geminiModel = body.geminiModel;
+  if (body.openaiModel !== undefined) fields.openaiModel = body.openaiModel;
+
+  try {
+    await upsertAIConfig(fields);
+  } catch (e: any) {
+    return res.status(500).json({ error: "Could not save AI config: " + e?.message });
+  }
+
+  // Apply live so the change takes effect without a restart.
+  if (fields.provider)    aiConfig.provider    = fields.provider as AIProvider;
+  if (fields.geminiKey)   aiConfig.geminiKey   = fields.geminiKey;
+  if (fields.openaiKey)   aiConfig.openaiKey   = fields.openaiKey;
+  if (fields.geminiModel !== undefined) aiConfig.geminiModel = fields.geminiModel;
+  if (fields.openaiModel !== undefined) aiConfig.openaiModel = fields.openaiModel;
+  rebuildAIClients();
+
+  res.json({ ok: true, provider: aiConfig.provider, ready: aiReady() });
+});
+
+// Test the active provider end-to-end (a tiny live call).
+app.post("/api/admin/ai-config/test", adminMiddleware, async (_req, res) => {
+  if (!aiReady()) return res.json({ ok: false, provider: aiConfig.provider, reason: `No API key set for ${aiConfig.provider}.` });
+  try {
+    const r = await generateWithFallback("Reply with exactly: OK", { temperature: 0 });
+    res.json({ ok: true, provider: aiConfig.provider, response: (r.text || "").trim().slice(0, 80) });
+  } catch (err: any) {
+    res.json({ ok: false, provider: aiConfig.provider, reason: aiError(err).message });
   }
 });
 
@@ -1680,7 +1826,7 @@ app.get("/api/quotes/:quoteId/insights", async (req, res) => {
     return res.json({ available: false });
   }
 
-  if (!aiClient) {
+  if (!aiReady()) {
     return res.json({ authorBio: null, quoteMeaning: null, historicalContext: null, relatedWorks: [], webReferences: [] });
   }
 
@@ -1773,7 +1919,7 @@ app.get("/api/admin/quotes/:quoteId/anatomy", adminMiddleware, async (req, res) 
 
 // Admin: generate all six sections from scratch (grounded), enable everything, persist.
 app.post("/api/admin/quotes/:quoteId/anatomy/generate", adminMiddleware, async (req, res) => {
-  if (!aiClient) return res.status(503).json({ error: "AI client not configured. Set GEMINI_API_KEY in .env" });
+  if (!aiReady()) return res.status(503).json({ error: "AI is not configured. Set a provider + API key in the dashboard AI tab." });
   const quote = await resolveQuoteForAnatomy(req.params.quoteId);
   if (!quote) return res.status(404).json({ error: "Quote not found" });
 
@@ -1807,7 +1953,7 @@ Return ONLY a JSON object with exactly these keys: ${ANATOMY_SECTIONS.join(", ")
 
 // Admin: regenerate a single section's prose — returns the draft WITHOUT saving.
 app.post("/api/admin/quotes/:quoteId/anatomy/regenerate-section", adminMiddleware, async (req, res) => {
-  if (!aiClient) return res.status(503).json({ error: "AI client not configured. Set GEMINI_API_KEY in .env" });
+  if (!aiReady()) return res.status(503).json({ error: "AI is not configured. Set a provider + API key in the dashboard AI tab." });
   const section = req.body?.section as AnatomySectionKey;
   if (!ANATOMY_SECTIONS.includes(section)) return res.status(400).json({ error: "Invalid section" });
   const quote = await resolveQuoteForAnatomy(req.params.quoteId);
@@ -2251,6 +2397,8 @@ async function startServer() {
     await runMigrations();
     // Ensure the admin account from env (ADMIN_EMAIL / ADMIN_PASSWORD).
     await ensureAdmin();
+    // Load the admin-set AI provider/keys (overrides env defaults).
+    await loadAIConfig();
   } catch (err: any) {
     if (IS_PROD) throw err;
     console.warn(`[db] Unavailable — starting in DB-less dev mode. DB-backed routes will fail. (${err?.message})`);
