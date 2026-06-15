@@ -289,6 +289,30 @@ async function generateWithFallback(
   throw lastErr;
 }
 
+// True when a Gemini error is a quota / rate-limit exhaustion (free-tier daily
+// cap, etc). Retrying these immediately just burns more of the same quota.
+function isQuotaError(err: any): boolean {
+  const raw = err?.message || "";
+  let code: number | undefined;
+  try { code = JSON.parse(raw).error?.code; } catch {}
+  return code === 429 || /RESOURCE_EXHAUSTED|quota/i.test(raw);
+}
+
+// Map a raw Gemini SDK error to a clean, user-facing message + HTTP status,
+// so we never leak the provider's error JSON to the client.
+function aiError(err: any): { status: number; message: string } {
+  const raw = err?.message || "";
+  let code: number | undefined;
+  try { code = JSON.parse(raw).error?.code; } catch {}
+  if (isQuotaError(err)) {
+    return { status: 429, message: "Our AI has reached today's usage limit. Please try again later." };
+  }
+  if (code === 503 || /UNAVAILABLE|overloaded/i.test(raw)) {
+    return { status: 503, message: "The AI service is busy right now. Please try again in a moment." };
+  }
+  return { status: 502, message: "Couldn't generate this right now. Please try again." };
+}
+
 // ── Auth constants ────────────────────────────────────────────────────────────
 const JWT_SECRET = process.env.JWT_SECRET || "ic-dev-secret-change-in-production";
 const SALT_ROUNDS = 10;
@@ -1407,7 +1431,10 @@ Search the web for scholarly critiques, philosophical objections, or documented 
       const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
       sources = chunks.map((c: any) => ({ title: c.web?.title || "", url: c.web?.uri || "" }))
         .filter((s: any) => s.title && s.url).slice(0, 4);
-    } catch {
+    } catch (gErr: any) {
+      // Grounded search can fail for non-quota reasons — retry once without tools.
+      // But on a quota/rate-limit error, retrying just wastes more quota: bail.
+      if (isQuotaError(gErr)) throw gErr;
       response = await generateWithFallback(prompt, { temperature: 0.7 });
     }
 
@@ -1417,7 +1444,8 @@ Search the web for scholarly critiques, philosophical objections, or documented 
     res.json(data);
   } catch (err: any) {
     console.error("[Gemini] Counterpoint error:", err.message);
-    res.status(500).json({ error: "Failed to generate counterpoint: " + err.message });
+    const { status, message } = aiError(err);
+    res.status(status).json({ error: message });
   }
 });
 
@@ -1646,6 +1674,12 @@ app.get("/api/quotes/:quoteId/insights", async (req, res) => {
   const cached = await getInsight(quoteId);
   if (cached) return res.json(cached);
 
+  // cacheOnly: caller (the Deep Dive tab opening) just wants existing insights —
+  // never spend an AI request on a page view. Signal "needs generation" instead.
+  if (req.query.cacheOnly === "1") {
+    return res.json({ available: false });
+  }
+
   if (!aiClient) {
     return res.json({ authorBio: null, quoteMeaning: null, historicalContext: null, relatedWorks: [], webReferences: [] });
   }
@@ -1663,7 +1697,8 @@ app.get("/api/quotes/:quoteId/insights", async (req, res) => {
     res.json(enrichment);
   } catch (err: any) {
     console.error("[Gemini] Insights error:", err.message);
-    res.status(500).json({ error: err.message });
+    const { status, message } = aiError(err);
+    res.status(status).json({ error: message });
   }
 });
 

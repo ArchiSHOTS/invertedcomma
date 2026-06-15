@@ -85,6 +85,8 @@ export default function QuotePage() {
     webReferences: { title: string; url: string }[];
   } | null>(null);
   const [isLoadingInsights, setIsLoadingInsights] = useState(false);
+  const [insightsChecked, setInsightsChecked] = useState(false); // cache check done
+  const [insightsError, setInsightsError] = useState("");
 
   const [newCommentText, setNewCommentText] = useState("");
   const [isCounterpoint, setIsCounterpoint] = useState(false);
@@ -181,14 +183,31 @@ export default function QuotePage() {
     }
   }, [quote?.id]);
 
-  // When quote loads: fetch discussions + insights
+  // When quote loads: fetch discussions (+ cached counterpoint). AI generation
+  // is on-demand only — never on page view — to conserve the AI quota. Reset
+  // per-quote AI state so nothing leaks from the previously viewed quote.
   useEffect(() => {
     if (!quote?.id) return;
+    setAiCounterpoint(null);
+    setAiSources([]);
+    setCounterpointError("");
+    setInsights(null);
+    setInsightsChecked(false);
+    setInsightsError("");
     fetchDiscussionsAndCounterpoint(quote);
-    fetchInsights(quote.id);
   }, [quote?.id]);
 
-  // ── Fetch discussions + auto-generate counterpoint ────────────────────────
+  // Lazy cache-check the Deep Dive the first time it's viewed (no AI cost).
+  // Covers the click case (activeTab → "deepdive") and the no-Context-tab case
+  // where the page opens straight on Deep Dive.
+  useEffect(() => {
+    if (!quote?.id || insightsChecked) return;
+    const opensOnDeepDive = !quote.context && quote.tags.length === 0;
+    if (activeTab === "deepdive" || opensOnDeepDive) loadCachedInsights(quote.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, quote?.id, insightsChecked]);
+
+  // ── Fetch discussions (counterpoint shown only if already cached) ──────────
   const fetchDiscussionsAndCounterpoint = async (q: Quote) => {
     setIsLoadingComments(true);
     try {
@@ -196,12 +215,11 @@ export default function QuotePage() {
       if (res.ok) {
         const d = await res.json();
         setComments(d.comments || []);
+        // Show a cached counterpoint if one exists; otherwise leave it to the
+        // user to click "Find Counterpoint" (no auto-generation).
         if (d.aiCounterpoint) {
           setAiCounterpoint(d.aiCounterpoint);
           setAiSources(d.aiSources || []);
-        } else {
-          // Auto-generate counterpoint (non-blocking)
-          generateCounterpoint(q.id, q.text, q.author);
         }
       }
     } finally { setIsLoadingComments(false); }
@@ -227,50 +245,39 @@ export default function QuotePage() {
     } finally { setIsGeneratingAi(false); }
   };
 
-  // ── Fetch insights (with background polling if not ready yet) ────────────
-  const insightsPollRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const fetchInsights = async (id: string) => {
-    setIsLoadingInsights(true);
+  // ── Deep Dive insights ──────────────────────────────────────────────────
+  // Cache check (no AI cost) when the Deep Dive tab is first opened; actual
+  // generation is an explicit user action, so page views never spend quota.
+  const loadCachedInsights = async (id: string) => {
     try {
-      const res = await fetch(`/api/quotes/${id}/insights`);
+      const res = await fetch(`/api/quotes/${id}/insights?cacheOnly=1`);
       if (res.ok) {
         const data = await res.json();
-        if (data.authorBio) {
-          setInsights(data);
-          setIsLoadingInsights(false);
-          return;
-        }
+        if (data.authorBio) setInsights(data);
       }
     } catch {}
-    // Not ready yet — show skeleton briefly then switch to "being generated" state,
-    // and poll a few times while enrichment is generated. Bounded on purpose:
-    // an unbounded loop hammered /insights every 8s forever when a quote never
-    // produced an authorBio (AI disabled/failing), which was a major Neon
-    // bandwidth sink. After MAX_POLLS we give up; a refresh re-attempts.
-    setIsLoadingInsights(false);
-    const MAX_POLLS = 6;
-    let attempts = 0;
-    const poll = () => {
-      insightsPollRef.current = setTimeout(async () => {
-        attempts++;
-        try {
-          const r = await fetch(`/api/quotes/${id}/insights`);
-          if (r.ok) {
-            const d = await r.json();
-            if (d.authorBio) { setInsights(d); return; }
-          }
-        } catch {}
-        if (attempts < MAX_POLLS) poll();
-      }, 10000);
-    };
-    poll();
+    finally { setInsightsChecked(true); }
   };
 
-  // Clear poll on unmount
-  React.useEffect(() => {
-    return () => { if (insightsPollRef.current) clearTimeout(insightsPollRef.current); };
-  }, []);
+  const generateInsights = async (id: string) => {
+    setIsLoadingInsights(true);
+    setInsightsError("");
+    try {
+      const res = await fetch(`/api/quotes/${id}/insights`);
+      const data = await res.json();
+      if (res.ok && data.authorBio) {
+        setInsights(data);
+      } else if (!res.ok) {
+        setInsightsError(data.error || "Couldn't generate the deep dive. Please try again.");
+      } else {
+        setInsightsError("No deep dive could be generated for this quote.");
+      }
+    } catch {
+      setInsightsError("Network error. Please try again.");
+    } finally {
+      setIsLoadingInsights(false);
+    }
+  };
 
   // ── Actions ───────────────────────────────────────────────────────────────
   const handlePostComment = async (e: React.FormEvent) => {
@@ -725,18 +732,22 @@ export default function QuotePage() {
                         )}
                       </div>
                     ) : (
-                      <div className="px-6 py-10 flex flex-col items-center gap-3">
-                        <div className="flex gap-1.5">
-                          {[0, 1, 2].map(i => (
-                            <div
-                              key={i}
-                              className="w-1.5 h-1.5 rounded-full bg-stone-300"
-                              style={{ animation: `pulse 1.4s ease-in-out ${i * 0.2}s infinite` }}
-                            />
-                          ))}
-                        </div>
-                        <p className="text-sm text-stone-400">Preparing your deep dive…</p>
-                        <p className="text-[11px] text-stone-300">This appears automatically once ready.</p>
+                      <div className="px-6 py-10 flex flex-col items-center gap-3 text-center">
+                        <p className="text-sm text-stone-400 leading-relaxed max-w-xs">
+                          Generate an AI deep dive — the quote's meaning, the author, historical context and further reading.
+                        </p>
+                        <button
+                          onClick={() => quote && generateInsights(quote.id)}
+                          disabled={isLoadingInsights}
+                          className="inline-flex items-center gap-2 h-10 px-6 rounded-full text-sm font-semibold text-white transition-all disabled:opacity-50 hover:opacity-90"
+                          style={{ background: BRAND }}
+                        >
+                          {isLoadingInsights ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                          {isLoadingInsights ? "Generating…" : "Generate Deep Dive"}
+                        </button>
+                        {insightsError && (
+                          <p className="text-xs text-red-400">{insightsError}</p>
+                        )}
                       </div>
                     )}
                   </section>

@@ -386,11 +386,22 @@ const LIST_COLS =
 
 export async function getRuntimeQuotes(status?: string) {
   if (!runtimeQuotesCache || runtimeQuotesCache.expiresAt < Date.now()) {
-    const { rows } = await pool.query(`SELECT ${LIST_COLS} FROM runtime_quotes ORDER BY created_at DESC`);
-    runtimeQuotesCache = {
-      rows: rows.map((r: any) => ({ ...r, tags: r.tags ?? [] })),
-      expiresAt: Date.now() + RUNTIME_QUOTES_CACHE_TTL_MS,
-    };
+    try {
+      const { rows } = await pool.query(`SELECT ${LIST_COLS} FROM runtime_quotes ORDER BY created_at DESC`);
+      runtimeQuotesCache = {
+        rows: rows.map((r: any) => ({ ...r, tags: r.tags ?? [] })),
+        expiresAt: Date.now() + RUNTIME_QUOTES_CACHE_TTL_MS,
+      };
+    } catch (e: any) {
+      // DB unavailable — serve the stale cache if we have one, else an empty list,
+      // so seed quotes / SSR / OG keep working through a Neon outage instead of
+      // 500ing. Short negative-cache TTL avoids hammering a down database.
+      console.error("[db] runtime_quotes read failed; serving cached/empty:", e?.message);
+      runtimeQuotesCache = {
+        rows: runtimeQuotesCache?.rows ?? [],
+        expiresAt: Date.now() + 30_000,
+      };
+    }
   }
   return status ? runtimeQuotesCache.rows.filter((r: any) => r.status === status) : runtimeQuotesCache.rows;
 }
@@ -610,10 +621,16 @@ export async function setSubscriberStatus(idOrEmail: string, status: "subscribed
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getInsight(quoteId: string) {
-  const { rows } = await pool.query(
-    "SELECT data FROM insights_cache WHERE quote_id=$1", [quoteId]
-  );
-  return rows[0]?.data ?? null;
+  try {
+    const { rows } = await pool.query(
+      "SELECT data FROM insights_cache WHERE quote_id=$1", [quoteId]
+    );
+    return rows[0]?.data ?? null;
+  } catch (e: any) {
+    // A failed cache read should behave as a cache miss, not hang/500 the request.
+    console.error("[db] insights_cache read failed; treating as miss:", e?.message);
+    return null;
+  }
 }
 
 export async function setInsight(quoteId: string, data: object) {
