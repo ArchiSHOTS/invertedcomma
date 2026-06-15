@@ -526,10 +526,16 @@ export async function bulkSetRuntimeQuoteStatus(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getComments(quoteId: string) {
-  const { rows } = await pool.query(
-    "SELECT * FROM comments WHERE quote_id=$1 ORDER BY created_at ASC", [quoteId]
-  );
-  return rows;
+  try {
+    const { rows } = await pool.query(
+      "SELECT * FROM comments WHERE quote_id=$1 ORDER BY created_at ASC", [quoteId]
+    );
+    return rows;
+  } catch (e: any) {
+    // A failed read shouldn't break the discussion view — return no comments.
+    console.error("[db] comments read failed; returning none:", e?.message);
+    return [];
+  }
 }
 
 export async function createComment(c: {

@@ -317,11 +317,18 @@ async function generateWithFallback(
 
 async function generateGemini(contents: string | any[], config: Record<string, any>): Promise<any> {
   if (!geminiClient) throw new Error("No Gemini client");
+  // Gemini rejects JSON response mode combined with googleSearch grounding —
+  // drop responseMimeType when tools are present (the prompt still requests JSON).
+  let geminiConfig = config;
+  if (config.tools && config.responseMimeType) {
+    const { responseMimeType, ...rest } = config;
+    geminiConfig = rest;
+  }
   const models = aiConfig.geminiModel ? [aiConfig.geminiModel] : GEMINI_MODELS;
   let lastErr: any;
   for (const model of models) {
     try {
-      const res = await geminiClient.models.generateContent({ model, contents, config });
+      const res = await geminiClient.models.generateContent({ model, contents, config: geminiConfig });
       if (models.indexOf(model) > 0) console.log(`[Gemini] Used fallback model: ${model}`);
       return res;
     } catch (err: any) {
@@ -473,7 +480,7 @@ Rules:
     let response: any;
     let webReferences: { title: string; url: string }[] = [];
     try {
-      response = await generateWithFallback(prompt, { tools: [{ googleSearch: {} }], temperature: 0.4 });
+      response = await generateWithFallback(prompt, { tools: [{ googleSearch: {} }], temperature: 0.4, responseMimeType: "application/json" });
       const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
       const groundedRefs = chunks
         .map((c: any) => ({ title: c.web?.title || "", url: c.web?.uri || "" }))
@@ -481,11 +488,11 @@ Rules:
         .slice(0, 6);
       if (groundedRefs.length > 0) webReferences = groundedRefs;
     } catch {
-      response = await generateWithFallback(prompt, { temperature: 0.4 });
+      response = await generateWithFallback(prompt, { temperature: 0.4, responseMimeType: "application/json" });
     }
-    const raw     = response.text?.trim() || "";
-    const jsonStr = raw.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
-    const parsed  = JSON.parse(jsonStr);
+    // Tolerant parse — handles fences/prose some models wrap around the JSON.
+    const parsed  = extractJsonObject(response.text?.trim() || "");
+    if (!parsed.authorBio) return null;
     return {
       authorBio:        parsed.authorBio        || "",
       quoteMeaning:     parsed.quoteMeaning     || "",
@@ -522,9 +529,8 @@ Return ONLY a JSON object:
 
 Return ONLY the JSON. No markdown, no commentary.`;
   try {
-    const res  = await generateWithFallback(prompt, { temperature: 0.3 });
-    const raw  = (res.text || "").trim().replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
-    const p    = JSON.parse(raw);
+    const res  = await generateWithFallback(prompt, { temperature: 0.3, responseMimeType: "application/json" });
+    const p    = extractJsonObject((res.text || "").trim());
     return {
       slug:         authorSlug(name),
       name,
@@ -1458,8 +1464,17 @@ app.delete("/api/admin/discussions/:quoteId/comments/:commentId", adminMiddlewar
 });
 
 app.get("/api/discussions/:quoteId", async (req, res) => {
-  const comments = await getComments(req.params.quoteId);
-  res.json({ quoteId: req.params.quoteId, comments });
+  const { quoteId } = req.params;
+  const comments = await getComments(quoteId);
+  // Surface the already-generated counterpoint (cached) so every visitor sees
+  // it without re-triggering generation.
+  const cp = await getInsight(`cp:${quoteId}`);
+  res.json({
+    quoteId,
+    comments,
+    aiCounterpoint: cp?.aiCounterpoint || null,
+    aiSources:      cp?.sources || [],
+  });
 });
 
 app.post("/api/discussions/:quoteId", validate(CommentSchema), async (req: any, res) => {
