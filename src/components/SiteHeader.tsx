@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 import Logo from "./Logo";
 import UserBadge from "./UserBadge";
 import VerifyEmailBanner from "./VerifyEmailBanner";
@@ -61,8 +61,57 @@ function HeaderSearch({ scrolled }: { scrolled: boolean }) {
   );
 }
 
+// Mobile inline search — expands within the header instead of routing to /explore
+function MobileSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const navigate = useNavigate();
+  const [term, setTerm] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) inputRef.current?.focus();
+    else setTerm("");
+  }, [open]);
+
+  if (!open) return null;
+
+  const submit = (e: import("react").FormEvent) => {
+    e.preventDefault();
+    if (term.trim()) {
+      navigate(`/explore?search=${encodeURIComponent(term.trim())}`);
+      onClose();
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="md:hidden flex items-center gap-2 w-full">
+      <div className="relative flex-1 flex items-center bg-white/70 border border-stone-200 rounded-full h-9 focus-within:ring-2 focus-within:ring-[#3D5A3E]/20 focus-within:border-[#3D5A3E]/40">
+        <Search className="absolute left-3 w-3.5 h-3.5 text-stone-400 pointer-events-none" />
+        <input
+          ref={inputRef}
+          type="search"
+          inputMode="search"
+          value={term}
+          onChange={(e) => setTerm(e.target.value)}
+          placeholder="Search quotes, authors, topics…"
+          className="w-full h-full bg-transparent rounded-full pl-8 pr-3 text-xs text-stone-800 placeholder-stone-400 focus:outline-none"
+          aria-label="Search quotes, authors, topics"
+        />
+      </div>
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close search"
+        className="w-9 h-9 flex-shrink-0 rounded-full flex items-center justify-center text-stone-500 hover:text-stone-800 hover:bg-stone-100 transition-colors"
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </form>
+  );
+}
+
 export default function SiteHeader() {
   const [scrolled, setScrolled] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const { pathname } = useLocation();
 
   useEffect(() => {
@@ -92,6 +141,10 @@ export default function SiteHeader() {
           }`}
           style={{ height: scrolled ? "3.25rem" : "4rem" }}
         >
+          {mobileSearchOpen ? (
+            <MobileSearch open={mobileSearchOpen} onClose={() => setMobileSearchOpen(false)} />
+          ) : (
+          <>
           <Link to="/" className="hover:opacity-75 transition-opacity flex-shrink-0">
             <Logo size={scrolled ? 26 : 32} iconOnly className="block md:hidden" />
             <Logo size={scrolled ? 22 : 28} className="hidden md:block" />
@@ -119,15 +172,18 @@ export default function SiteHeader() {
 
           <div className="flex items-center gap-2">
             <HeaderSearch scrolled={scrolled} />
-            <Link
-              to="/explore"
+            <button
+              type="button"
+              onClick={() => setMobileSearchOpen(true)}
               aria-label="Search"
               className="md:hidden w-9 h-9 rounded-full flex items-center justify-center text-stone-500 hover:text-stone-800 hover:bg-stone-100 transition-colors"
             >
               <Search className="w-4 h-4" />
-            </Link>
+            </button>
             <UserBadge />
           </div>
+          </>
+          )}
         </div>
       </div>
     </header>

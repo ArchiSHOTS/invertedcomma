@@ -224,11 +224,6 @@ function HomePage() {
           <h2 className="font-serif italic text-3xl md:text-4xl lg:text-5xl text-stone-800 font-bold mb-1">
             Explore quotes
           </h2>
-          {isFiltered && (
-            <p className="text-stone-400 text-sm">
-              {filteredQuotes.length} of {quotes.length} quotes
-            </p>
-          )}
         </div>
 
         {/* Search bar — centered */}
@@ -270,16 +265,13 @@ function HomePage() {
             <button
               key={tc.name}
               onClick={() => setSelectedTag(selectedTag === tc.name ? null : tc.name)}
-              className={`flex-shrink-0 h-8 px-4 rounded-full text-xs font-medium transition-all border flex items-center gap-1.5 ${
+              className={`flex-shrink-0 h-8 px-4 rounded-full text-xs font-medium transition-all border ${
                 selectedTag === tc.name
                   ? "bg-[#3D5A3E] text-white border-[#3D5A3E]"
                   : "bg-white text-stone-500 border-stone-200 hover:border-stone-400"
               }`}
             >
               #{tc.name}
-              <span className={`text-[10px] font-mono ${selectedTag === tc.name ? "text-white/60" : "text-stone-400"}`}>
-                {tc.count}
-              </span>
             </button>
           ))}
         </div>

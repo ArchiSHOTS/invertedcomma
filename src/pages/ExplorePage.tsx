@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   BookOpen, Film, Mic2, FileText, Newspaper, MessageCircle,
-  Feather, Hash, Search, X, RefreshCw, ChevronRight, Sparkles, FileSearch,
+  Feather, Hash, X, RefreshCw, ChevronLeft, ChevronRight, Sparkles, FileSearch,
 } from "lucide-react";
 import { Quote, SourceType } from "../types";
 import { useAnatomyIds } from "../hooks/useAnatomyIds";
@@ -102,24 +102,25 @@ function ExploreQuoteCard({ quote, onTagClick, hasAnatomy }: { quote: Quote; onT
 
 // ── Category sidebar chip ───────────────────────────────────────────────────
 function CategoryChip({
-  label, count, active, onClick,
-}: { label: string; count: number; active: boolean; onClick: () => void }) {
+  label, active, onClick,
+}: { label: string; active: boolean; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className={`flex items-center justify-between w-full px-3 py-2 rounded-xl text-xs font-medium transition-all text-left ${
+      className={`flex items-center w-full px-3 py-2 rounded-xl text-xs font-medium transition-all text-left ${
         active
           ? "bg-[#3D5A3E] text-white"
           : "bg-white text-stone-600 hover:bg-stone-50 border border-stone-200"
       }`}
     >
-      <span className="truncate pr-2">{label}</span>
-      <span className={`text-[10px] font-mono flex-shrink-0 ${active ? "text-white/70" : "text-stone-400"}`}>{count}</span>
+      <span className="truncate">{label}</span>
     </button>
   );
 }
 
 // ── Main page ───────────────────────────────────────────────────────────────
+const PAGE_SIZE = 24;
+
 export default function ExplorePage() {
   const anatomyIds = useAnatomyIds();
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -127,16 +128,17 @@ export default function ExplorePage() {
   const [activeSource, setActiveSource] = useState<SourceType | "all">("all");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
   const [searchParams, setSearchParams] = useSearchParams();
-  const [searchTerm, setSearchTerm] = useState(searchParams.get("search") || "");
 
-  // Keep the URL in sync so header search links / back-forward navigation work
-  useEffect(() => {
+  // Search is driven entirely by the header search box (via the ?search= param) —
+  // the Explore page no longer renders its own search input.
+  const searchTerm = searchParams.get("search") || "";
+  const clearSearch = () => {
     const next = new URLSearchParams(searchParams);
-    if (searchTerm.trim()) next.set("search", searchTerm); else next.delete("search");
+    next.delete("search");
     setSearchParams(next, { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchTerm]);
+  };
 
   useEffect(() => {
     fetch("/api/quotes")
@@ -193,10 +195,41 @@ export default function ExplorePage() {
     setActiveSource("all");
     setActiveCategory(null);
     setActiveTag(null);
-    setSearchTerm("");
+    clearSearch();
   };
 
   const sortedCategories = (Object.entries(categoryCounts) as [string, number][]).sort((a, b) => b[1] - a[1]);
+
+  // ── Pagination ──
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paginated = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  // Reset to the first page whenever the filters or search change
+  useEffect(() => {
+    setPage(1);
+  }, [activeSource, activeCategory, activeTag, searchTerm]);
+
+  // Scroll back to the top of the grid when paging
+  const goToPage = (p: number) => {
+    setPage(p);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  // Compact page-number list with ellipses (e.g. 1 … 4 5 [6] 7 8 … 20)
+  const pageNumbers = useMemo(() => {
+    const pages: (number | "…")[] = [];
+    const push = (n: number | "…") => pages.push(n);
+    const span = 1; // pages on each side of the current page
+    for (let p = 1; p <= totalPages; p++) {
+      if (p === 1 || p === totalPages || (p >= currentPage - span && p <= currentPage + span)) {
+        push(p);
+      } else if (pages[pages.length - 1] !== "…") {
+        push("…");
+      }
+    }
+    return pages;
+  }, [totalPages, currentPage]);
 
   return (
     <div className="min-h-screen bg-[#FBF9F6] flex flex-col">
@@ -207,7 +240,7 @@ export default function ExplorePage() {
         <div className="mb-8">
           <h1 className="font-serif italic font-bold text-4xl md:text-5xl text-stone-800 mb-2">Explore</h1>
           <p className="text-stone-500 text-sm">
-            {quotes.length} quotes from books, films, speeches, essays and more
+            Quotes from books, films, speeches, essays and more
           </p>
         </div>
 
@@ -229,33 +262,20 @@ export default function ExplorePage() {
               >
                 <Icon className="w-5 h-5" />
                 <span className="text-[10px] font-semibold leading-tight text-center">{label}</span>
-                <span className={`text-[10px] font-mono ${active ? "text-white/70" : "text-stone-400"}`}>{count}</span>
               </button>
             );
           })}
         </div>
 
-        {/* ── Search bar ── */}
-        <div className="relative max-w-xl mb-6">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400 pointer-events-none" />
-          <input
-            type="search"
-            placeholder="Search quotes, authors, sources…"
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            className="w-full bg-white border border-stone-200 rounded-full pl-11 pr-10 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#3D5A3E]/20 focus:border-[#3D5A3E]/40 text-stone-800 placeholder-stone-400 shadow-sm transition-all"
-          />
-          {searchTerm && (
-            <button onClick={() => setSearchTerm("")} className="absolute right-3.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-stone-200 flex items-center justify-center text-stone-500 hover:bg-stone-300 transition-colors">
-              <X className="w-3 h-3" />
-            </button>
-          )}
-        </div>
-
         {/* Active filter summary + clear */}
         {hasFilters && (
           <div className="flex items-center gap-2 mb-4 flex-wrap">
-            <span className="text-xs text-stone-500">{filtered.length} results</span>
+            {searchTerm && (
+              <span className="inline-flex items-center gap-1 bg-stone-800 text-white text-xs px-3 py-1 rounded-full">
+                “{searchTerm}”
+                <button onClick={clearSearch} aria-label="Clear search"><X className="w-3 h-3" /></button>
+              </span>
+            )}
             {activeSource !== "all" && (
               <span className="inline-flex items-center gap-1 bg-[#3D5A3E] text-white text-xs px-3 py-1 rounded-full">
                 {SOURCE_TYPES.find(s => s.key === activeSource)?.label}
@@ -292,18 +312,16 @@ export default function ExplorePage() {
               <div className="flex flex-col gap-1">
                 <button
                   onClick={() => setActiveCategory(null)}
-                  className={`flex items-center justify-between w-full px-3 py-2 rounded-xl text-xs font-medium transition-all text-left ${
+                  className={`flex items-center w-full px-3 py-2 rounded-xl text-xs font-medium transition-all text-left ${
                     !activeCategory ? "bg-[#3D5A3E] text-white" : "bg-white text-stone-600 hover:bg-stone-50 border border-stone-200"
                   }`}
                 >
                   <span>All Categories</span>
-                  <span className={`text-[10px] font-mono ${!activeCategory ? "text-white/70" : "text-stone-400"}`}>{quotes.length}</span>
                 </button>
-                {sortedCategories.map(([cat, count]) => (
+                {sortedCategories.map(([cat]) => (
                   <CategoryChip
                     key={cat}
                     label={cat}
-                    count={count}
                     active={activeCategory === cat}
                     onClick={() => setActiveCategory(activeCategory === cat ? null : cat)}
                   />
@@ -315,7 +333,7 @@ export default function ExplorePage() {
             <div>
               <h3 className="text-[10px] font-bold uppercase tracking-widest text-stone-400 mb-2 px-1">Popular Tags</h3>
               <div className="flex flex-wrap gap-1">
-                {topTags.map(([tag, count]) => (
+                {topTags.map(([tag]) => (
                   <button
                     key={tag}
                     onClick={() => setActiveTag(activeTag === tag ? null : tag)}
@@ -326,7 +344,6 @@ export default function ExplorePage() {
                     }`}
                   >
                     #{tag}
-                    <span className={`font-mono ${activeTag === tag ? "text-white/60" : "text-stone-300"}`}>{count}</span>
                   </button>
                 ))}
               </div>
@@ -348,14 +365,8 @@ export default function ExplorePage() {
               </div>
             ) : (
               <>
-                <p className="text-xs text-stone-400 mb-4">
-                  Showing {filtered.length} {filtered.length === 1 ? "quote" : "quotes"}
-                  {activeSource !== "all" && ` from ${SOURCE_TYPES.find(s => s.key === activeSource)?.label.toLowerCase()}`}
-                  {activeCategory && ` in ${activeCategory}`}
-                  {activeTag && ` tagged #${activeTag}`}
-                </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {filtered.map(q => (
+                  {paginated.map(q => (
                     <ExploreQuoteCard
                       key={q.id}
                       quote={q}
@@ -364,6 +375,44 @@ export default function ExplorePage() {
                     />
                   ))}
                 </div>
+
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <nav className="flex items-center justify-center gap-1.5 mt-10" aria-label="Pagination">
+                    <button
+                      onClick={() => goToPage(currentPage - 1)}
+                      disabled={currentPage === 1}
+                      className="inline-flex items-center gap-1 px-3 h-9 rounded-full text-xs font-medium border border-stone-200 bg-white text-stone-600 hover:border-stone-400 disabled:opacity-40 disabled:pointer-events-none transition-all"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" /> Prev
+                    </button>
+                    {pageNumbers.map((p, i) =>
+                      p === "…" ? (
+                        <span key={`gap-${i}`} className="px-1 text-stone-400 text-xs select-none">…</span>
+                      ) : (
+                        <button
+                          key={p}
+                          onClick={() => goToPage(p)}
+                          aria-current={p === currentPage ? "page" : undefined}
+                          className={`w-9 h-9 rounded-full text-xs font-semibold transition-all ${
+                            p === currentPage
+                              ? "bg-[#3D5A3E] text-white"
+                              : "bg-white text-stone-600 border border-stone-200 hover:border-stone-400"
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      )
+                    )}
+                    <button
+                      onClick={() => goToPage(currentPage + 1)}
+                      disabled={currentPage === totalPages}
+                      className="inline-flex items-center gap-1 px-3 h-9 rounded-full text-xs font-medium border border-stone-200 bg-white text-stone-600 hover:border-stone-400 disabled:opacity-40 disabled:pointer-events-none transition-all"
+                    >
+                      Next <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </nav>
+                )}
               </>
             )}
           </div>

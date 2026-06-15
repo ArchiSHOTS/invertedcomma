@@ -72,7 +72,6 @@ export default function TagPage() {
               <Tag className="w-3 h-3" />
               Tag
             </span>
-            <span className="text-stone-400 text-sm font-mono">{taggedQuotes.length} quotes</span>
           </div>
           <h1 className="font-serif italic font-bold text-3xl md:text-4xl text-stone-800">
             #{tag}

@@ -141,10 +141,6 @@ export default function AuthorPage() {
                   {author.nationality}
                 </span>
               )}
-              <span className="flex items-center gap-1">
-                <BookOpen className="w-3 h-3" />
-                {quotes.length} quote{quotes.length !== 1 ? "s" : ""}
-              </span>
             </div>
           </div>
         </div>
@@ -172,7 +168,7 @@ export default function AuthorPage() {
 
         {/* ── Quotes grid ──────────────────────────────────────────────────── */}
         <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-stone-400 mb-5">
-          Quotes · {quotes.length}
+          Quotes
         </h2>
 
         {quotes.length === 0 ? (
