@@ -15,8 +15,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["philosophy", "stoicism", "psychology", "mental-health", "anxiety"],
     likes: 812, bookmarks: 532,
     relatedBooks: [
-      { title: "Letters from a Stoic", author: "Seneca", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780140442109" },
-      { title: "Meditations", author: "Marcus Aurelius", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780812968255" }
+      { title: "Letters from a Stoic", author: "Seneca" },
+      { title: "Meditations", author: "Marcus Aurelius" }
     ]
   },
   {
@@ -31,8 +31,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["philosophy", "stoicism", "psychology", "happiness", "mindfulness"],
     likes: 742, bookmarks: 490,
     relatedBooks: [
-      { title: "Meditations", author: "Marcus Aurelius", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780812968255" },
-      { title: "The Obstacle Is the Way", author: "Ryan Holiday", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781591846352" }
+      { title: "Meditations", author: "Marcus Aurelius" },
+      { title: "The Obstacle Is the Way", author: "Ryan Holiday" }
     ]
   },
   {
@@ -46,8 +46,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["philosophy", "psychology", "motivation", "existentialism", "resilience"],
     likes: 624, bookmarks: 395,
     relatedBooks: [
-      { title: "Man's Search for Meaning", author: "Viktor Frankl", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780807014295" },
-      { title: "Twilight of the Idols", author: "Friedrich Nietzsche", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780140445145" }
+      { title: "Man's Search for Meaning", author: "Viktor Frankl" },
+      { title: "Twilight of the Idols", author: "Friedrich Nietzsche" }
     ]
   },
   {
@@ -61,8 +61,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["philosophy", "wisdom", "history", "self-improvement", "reflection"],
     likes: 512, bookmarks: 288,
     relatedBooks: [
-      { title: "The Apology", author: "Plato", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780872200185" },
-      { title: "The Last Days of Socrates", author: "Plato", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780140449280" }
+      { title: "The Apology", author: "Plato" },
+      { title: "The Last Days of Socrates", author: "Plato" }
     ]
   },
   {
@@ -77,8 +77,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["philosophy", "existentialism", "freedom", "responsibility", "psychology"],
     likes: 489, bookmarks: 301,
     relatedBooks: [
-      { title: "Existentialism is a Humanism", author: "Jean-Paul Sartre", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780300115468" },
-      { title: "Being and Nothingness", author: "Jean-Paul Sartre", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780671867805" }
+      { title: "Existentialism is a Humanism", author: "Jean-Paul Sartre" },
+      { title: "Being and Nothingness", author: "Jean-Paul Sartre" }
     ]
   },
 
@@ -94,8 +94,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["architecture", "design", "minimalism", "creativity", "aesthetics"],
     likes: 342, bookmarks: 189,
     relatedBooks: [
-      { title: "Less and More: The Design Ethos of Dieter Rams", author: "Klaus Klemp", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9783899553253" },
-      { title: "The Architecture of Mies van der Rohe", author: "Franz Schulze", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780226740591" }
+      { title: "Less and More: The Design Ethos of Dieter Rams", author: "Klaus Klemp" },
+      { title: "The Architecture of Mies van der Rohe", author: "Franz Schulze" }
     ]
   },
   {
@@ -110,8 +110,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["architecture", "design", "creativity", "philosophy", "function"],
     likes: 215, bookmarks: 98,
     relatedBooks: [
-      { title: "Kindergarten Chats", author: "Louis Sullivan", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780486233475" },
-      { title: "The Death and Life of Great American Cities", author: "Jane Jacobs", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780679741955" }
+      { title: "Kindergarten Chats", author: "Louis Sullivan" },
+      { title: "The Death and Life of Great American Cities", author: "Jane Jacobs" }
     ]
   },
   {
@@ -125,8 +125,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["design", "minimalism", "creativity", "product", "aesthetics"],
     likes: 412, bookmarks: 256,
     relatedBooks: [
-      { title: "As Little Design as Possible", author: "Sophie Lovell", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780714849188" },
-      { title: "The Design of Everyday Things", author: "Don Norman", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780465050659" }
+      { title: "As Little Design as Possible", author: "Sophie Lovell" },
+      { title: "The Design of Everyday Things", author: "Don Norman" }
     ]
   },
   {
@@ -140,8 +140,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["design", "business", "technology", "creativity", "product"],
     likes: 524, bookmarks: 312,
     relatedBooks: [
-      { title: "Steve Jobs", author: "Walter Isaacson", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781451648539" },
-      { title: "Jony Ive: The Genius Behind Apple's Greatest Products", author: "Leander Kahney", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781591847007" }
+      { title: "Steve Jobs", author: "Walter Isaacson" },
+      { title: "Jony Ive: The Genius Behind Apple's Greatest Products", author: "Leander Kahney" }
     ]
   },
   {
@@ -155,8 +155,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["design", "creativity", "art", "perfectionism", "craft"],
     likes: 310, bookmarks: 178,
     relatedBooks: [
-      { title: "Eames: Beautiful Details", author: "Gloria Fowler", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9783836516099" },
-      { title: "An Eames Anthology", author: "Daniel Ostroff", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780300192483" }
+      { title: "Eames: Beautiful Details", author: "Gloria Fowler" },
+      { title: "An Eames Anthology", author: "Daniel Ostroff" }
     ]
   },
 
@@ -172,8 +172,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["art", "creativity", "education", "childhood", "growth"],
     likes: 612, bookmarks: 345,
     relatedBooks: [
-      { title: "Big Magic: Creative Living Beyond Fear", author: "Elizabeth Gilbert", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781594634727" },
-      { title: "Steal Like an Artist", author: "Austin Kleon", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780761169253" }
+      { title: "Big Magic: Creative Living Beyond Fear", author: "Elizabeth Gilbert" },
+      { title: "Steal Like an Artist", author: "Austin Kleon" }
     ]
   },
   {
@@ -187,8 +187,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["creativity", "intelligence", "art", "motivation", "science"],
     likes: 856, bookmarks: 512,
     relatedBooks: [
-      { title: "The Innovators", author: "Walter Isaacson", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781476708706" },
-      { title: "A Whack on the Side of the Head", author: "Roger von Oech", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780446404044" }
+      { title: "The Innovators", author: "Walter Isaacson" },
+      { title: "A Whack on the Side of the Head", author: "Roger von Oech" }
     ]
   },
   {
@@ -202,8 +202,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["creativity", "motivation", "literature", "inspiration", "abundance"],
     likes: 512, bookmarks: 289,
     relatedBooks: [
-      { title: "I Know Why the Caged Bird Sings", author: "Maya Angelou", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780345514400" },
-      { title: "The Artist's Way", author: "Julia Cameron", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780143129257" }
+      { title: "I Know Why the Caged Bird Sings", author: "Maya Angelou" },
+      { title: "The Artist's Way", author: "Julia Cameron" }
     ]
   },
   {
@@ -217,8 +217,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["art", "minimalism", "creativity", "philosophy", "aesthetics"],
     likes: 389, bookmarks: 214,
     relatedBooks: [
-      { title: "Picasso: A Biography", author: "Patrick O'Brian", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780393317350" },
-      { title: "Ways of Seeing", author: "John Berger", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780140135152" }
+      { title: "Picasso: A Biography", author: "Patrick O'Brian" },
+      { title: "Ways of Seeing", author: "John Berger" }
     ]
   },
 
@@ -234,8 +234,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["business", "entrepreneurship", "motivation", "success", "leadership"],
     likes: 723, bookmarks: 410,
     relatedBooks: [
-      { title: "The Effective Executive", author: "Peter Drucker", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780060833459" },
-      { title: "Innovation and Entrepreneurship", author: "Peter Drucker", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780060851132" }
+      { title: "The Effective Executive", author: "Peter Drucker" },
+      { title: "Innovation and Entrepreneurship", author: "Peter Drucker" }
     ]
   },
   {
@@ -249,8 +249,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["business", "entrepreneurship", "startup", "product", "iteration"],
     likes: 489, bookmarks: 265,
     relatedBooks: [
-      { title: "The Lean Startup", author: "Eric Ries", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780307887894" },
-      { title: "Blitzscaling", author: "Reid Hoffman", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781524761417" }
+      { title: "The Lean Startup", author: "Eric Ries" },
+      { title: "Blitzscaling", author: "Reid Hoffman" }
     ]
   },
   {
@@ -264,8 +264,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["business", "success", "failure", "education", "growth"],
     likes: 520, bookmarks: 298,
     relatedBooks: [
-      { title: "Business @ the Speed of Thought", author: "Bill Gates", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780446525688" },
-      { title: "Thinking in Bets", author: "Annie Duke", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780735216372" }
+      { title: "Business @ the Speed of Thought", author: "Bill Gates" },
+      { title: "Thinking in Bets", author: "Annie Duke" }
     ]
   },
   {
@@ -279,8 +279,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["business", "wealth", "philosophy", "life", "success", "compounding"],
     likes: 670, bookmarks: 450,
     relatedBooks: [
-      { title: "The Almanack of Naval Ravikant", author: "Eric Jorgenson", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781544514055" },
-      { title: "Poor Charlie's Almanack", author: "Charlie Munger", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781578645015" }
+      { title: "The Almanack of Naval Ravikant", author: "Eric Jorgenson" },
+      { title: "Poor Charlie's Almanack", author: "Charlie Munger" }
     ]
   },
   {
@@ -294,8 +294,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["business", "entrepreneurship", "startup", "technology", "speed"],
     likes: 380, bookmarks: 180,
     relatedBooks: [
-      { title: "Zero to One", author: "Peter Thiel", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780804139021" },
-      { title: "The Hard Thing About Hard Things", author: "Ben Horowitz", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780062273208" }
+      { title: "Zero to One", author: "Peter Thiel" },
+      { title: "The Hard Thing About Hard Things", author: "Ben Horowitz" }
     ]
   },
 
@@ -311,8 +311,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["literature", "education", "books", "loyalty", "reading"],
     likes: 412, bookmarks: 245,
     relatedBooks: [
-      { title: "A Moveable Feast", author: "Ernest Hemingway", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780684833637" },
-      { title: "On Writing", author: "Stephen King", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781982159375" }
+      { title: "A Moveable Feast", author: "Ernest Hemingway" },
+      { title: "On Writing", author: "Stephen King" }
     ]
   },
   {
@@ -327,8 +327,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["literature", "philosophy", "hope", "beauty", "aspiration"],
     likes: 634, bookmarks: 391,
     relatedBooks: [
-      { title: "The Picture of Dorian Gray", author: "Oscar Wilde", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780141439570" },
-      { title: "De Profundis and Other Writings", author: "Oscar Wilde", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780140432893" }
+      { title: "The Picture of Dorian Gray", author: "Oscar Wilde" },
+      { title: "De Profundis and Other Writings", author: "Oscar Wilde" }
     ]
   },
   {
@@ -342,8 +342,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["literature", "education", "books", "wisdom", "culture"],
     likes: 521, bookmarks: 310,
     relatedBooks: [
-      { title: "How to Think: A Survival Guide for a World at Odds", author: "Alan Jacobs", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780451499608" },
-      { title: "The Complete Works of Cicero", author: "Cicero", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781840220865" }
+      { title: "How to Think: A Survival Guide for a World at Odds", author: "Alan Jacobs" },
+      { title: "The Complete Works of Cicero", author: "Cicero" }
     ]
   },
   {
@@ -357,8 +357,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["design", "philosophy", "art", "creativity", "minimalism"],
     likes: 678, bookmarks: 421,
     relatedBooks: [
-      { title: "Leonardo da Vinci", author: "Walter Isaacson", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781501139154" },
-      { title: "The Notebooks of Leonardo da Vinci", author: "Leonardo da Vinci", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780486225739" }
+      { title: "Leonardo da Vinci", author: "Walter Isaacson" },
+      { title: "The Notebooks of Leonardo da Vinci", author: "Leonardo da Vinci" }
     ]
   },
 
@@ -374,8 +374,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["science", "wisdom", "courage", "philosophy", "fear"],
     likes: 590, bookmarks: 378,
     relatedBooks: [
-      { title: "Madame Curie: A Biography", author: "Eve Curie", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780306810381" },
-      { title: "The Age of Wonder", author: "Richard Holmes", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781400031870" }
+      { title: "Madame Curie: A Biography", author: "Eve Curie" },
+      { title: "The Age of Wonder", author: "Richard Holmes" }
     ]
   },
   {
@@ -390,8 +390,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["science", "psychology", "education", "critical-thinking", "rationality"],
     likes: 467, bookmarks: 280,
     relatedBooks: [
-      { title: "Cosmos", author: "Carl Sagan", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780345539435" },
-      { title: "The Demon-Haunted World", author: "Carl Sagan", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780345409461" }
+      { title: "Cosmos", author: "Carl Sagan" },
+      { title: "The Demon-Haunted World", author: "Carl Sagan" }
     ]
   },
   {
@@ -406,8 +406,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["science", "creativity", "education", "intelligence", "innovation"],
     likes: 810, bookmarks: 490,
     relatedBooks: [
-      { title: "Einstein: His Life and Universe", author: "Walter Isaacson", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780743264747" },
-      { title: "The Theory of Everything", author: "Stephen Hawking", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781904950080" }
+      { title: "Einstein: His Life and Universe", author: "Walter Isaacson" },
+      { title: "The Theory of Everything", author: "Stephen Hawking" }
     ]
   },
   {
@@ -422,8 +422,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["science", "technology", "innovation", "futurism", "culture"],
     likes: 445, bookmarks: 265,
     relatedBooks: [
-      { title: "2001: A Space Odyssey", author: "Arthur C. Clarke", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780451457998" },
-      { title: "The Singularity Is Near", author: "Ray Kurzweil", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780143037880" }
+      { title: "2001: A Space Odyssey", author: "Arthur C. Clarke" },
+      { title: "The Singularity Is Near", author: "Ray Kurzweil" }
     ]
   },
 
@@ -439,8 +439,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["psychology", "mind", "philosophy", "self-improvement", "unconscious"],
     likes: 689, bookmarks: 412,
     relatedBooks: [
-      { title: "Man and His Symbols", author: "Carl Jung", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780440351832" },
-      { title: "The Archetypes and the Collective Unconscious", author: "Carl Jung", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780691018331" }
+      { title: "Man and His Symbols", author: "Carl Jung" },
+      { title: "The Archetypes and the Collective Unconscious", author: "Carl Jung" }
     ]
   },
   {
@@ -454,8 +454,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["psychology", "individuality", "life", "wisdom", "identity"],
     likes: 478, bookmarks: 290,
     relatedBooks: [
-      { title: "Memories, Dreams, Reflections", author: "Carl Jung", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780679723950" },
-      { title: "The Road Less Travelled", author: "M. Scott Peck", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780743243155" }
+      { title: "Memories, Dreams, Reflections", author: "Carl Jung" },
+      { title: "The Road Less Travelled", author: "M. Scott Peck" }
     ]
   },
   {
@@ -469,8 +469,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["education", "mind", "psychology", "wisdom", "learning"],
     likes: 634, bookmarks: 398,
     relatedBooks: [
-      { title: "Plutarch's Lives", author: "Plutarch", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780375760129" },
-      { title: "How to Think", author: "Alan Jacobs", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780451499608" }
+      { title: "Plutarch's Lives", author: "Plutarch" },
+      { title: "How to Think", author: "Alan Jacobs" }
     ]
   },
 
@@ -487,8 +487,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["history", "philosophy", "wisdom", "education", "politics"],
     likes: 504, bookmarks: 312,
     relatedBooks: [
-      { title: "The Lessons of History", author: "Will & Ariel Durant", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781439149959" },
-      { title: "Sapiens", author: "Yuval Noah Harari", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780062316097" }
+      { title: "The Lessons of History", author: "Will & Ariel Durant" },
+      { title: "Sapiens", author: "Yuval Noah Harari" }
     ]
   },
   {
@@ -502,8 +502,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["history", "politics", "truth", "power", "narrative"],
     likes: 388, bookmarks: 189,
     relatedBooks: [
-      { title: "The Second World War", author: "Winston Churchill", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780395416853" },
-      { title: "A People's History of the United States", author: "Howard Zinn", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780062397348" }
+      { title: "The Second World War", author: "Winston Churchill" },
+      { title: "A People's History of the United States", author: "Howard Zinn" }
     ]
   },
   {
@@ -517,8 +517,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["history", "politics", "power", "philosophy", "truth"],
     likes: 556, bookmarks: 334,
     relatedBooks: [
-      { title: "The Prince", author: "Niccolò Machiavelli", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780140449150" },
-      { title: "On Tyranny", author: "Timothy Snyder", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780804190114" }
+      { title: "The Prince", author: "Niccolò Machiavelli" },
+      { title: "On Tyranny", author: "Timothy Snyder" }
     ]
   },
 
@@ -535,8 +535,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["motivation", "success", "philosophy", "wisdom", "beginning"],
     likes: 924, bookmarks: 610,
     relatedBooks: [
-      { title: "Tao Te Ching", author: "Lao Tzu", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780061142666" },
-      { title: "The Way of the Peaceful Warrior", author: "Dan Millman", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781932073205" }
+      { title: "Tao Te Ching", author: "Lao Tzu" },
+      { title: "The Way of the Peaceful Warrior", author: "Dan Millman" }
     ]
   },
   {
@@ -550,8 +550,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["motivation", "failure", "success", "growth", "mastery"],
     likes: 815, bookmarks: 520,
     relatedBooks: [
-      { title: "Outliers", author: "Malcolm Gladwell", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780316017930" },
-      { title: "Mindset: The New Psychology of Success", author: "Carol Dweck", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780345472328" }
+      { title: "Outliers", author: "Malcolm Gladwell" },
+      { title: "Mindset: The New Psychology of Success", author: "Carol Dweck" }
     ]
   },
   {
@@ -565,8 +565,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["motivation", "success", "philosophy", "persistence", "discipline"],
     likes: 712, bookmarks: 455,
     relatedBooks: [
-      { title: "The Analects of Confucius", author: "Confucius", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780679722960" },
-      { title: "Grit", author: "Angela Duckworth", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781501111112" }
+      { title: "The Analects of Confucius", author: "Confucius" },
+      { title: "Grit", author: "Angela Duckworth" }
     ]
   },
   {
@@ -580,8 +580,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["motivation", "success", "self-improvement", "psychology", "agency"],
     likes: 512, bookmarks: 304,
     relatedBooks: [
-      { title: "The Principles of Psychology", author: "William James", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780486203812" },
-      { title: "Thinking, Fast and Slow", author: "Daniel Kahneman", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780374533557" }
+      { title: "The Principles of Psychology", author: "William James" },
+      { title: "Thinking, Fast and Slow", author: "Daniel Kahneman" }
     ]
   },
 
@@ -598,8 +598,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["leadership", "philosophy", "power", "wisdom", "management"],
     likes: 589, bookmarks: 368,
     relatedBooks: [
-      { title: "Servant Leadership", author: "Robert Greenleaf", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780809105359" },
-      { title: "Turn the Ship Around!", author: "L. David Marquet", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781591846406" }
+      { title: "Servant Leadership", author: "Robert Greenleaf" },
+      { title: "Turn the Ship Around!", author: "L. David Marquet" }
     ]
   },
   {
@@ -613,8 +613,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["leadership", "business", "success", "motivation", "empowerment"],
     likes: 478, bookmarks: 292,
     relatedBooks: [
-      { title: "Leaders Eat Last", author: "Simon Sinek", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781591845560" },
-      { title: "The Culture Code", author: "Daniel Coyle", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780804176989" }
+      { title: "Leaders Eat Last", author: "Simon Sinek" },
+      { title: "The Culture Code", author: "Daniel Coyle" }
     ]
   },
 
@@ -630,8 +630,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["nature", "philosophy", "health", "mindfulness", "environment"],
     likes: 498, bookmarks: 312,
     relatedBooks: [
-      { title: "My First Summer in the Sierra", author: "John Muir", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780486426044" },
-      { title: "The Overstory", author: "Richard Powers", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780393356687" }
+      { title: "My First Summer in the Sierra", author: "John Muir" },
+      { title: "The Overstory", author: "Richard Powers" }
     ]
   },
   {
@@ -645,8 +645,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["nature", "science", "philosophy", "wisdom", "observation"],
     likes: 534, bookmarks: 320,
     relatedBooks: [
-      { title: "The Hidden Life of Trees", author: "Peter Wohlleben", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781771642484" },
-      { title: "Braiding Sweetgrass", author: "Robin Wall Kimmerer", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781571313560" }
+      { title: "The Hidden Life of Trees", author: "Peter Wohlleben" },
+      { title: "Braiding Sweetgrass", author: "Robin Wall Kimmerer" }
     ]
   },
 
@@ -662,8 +662,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["mathematics", "science", "philosophy", "logic", "universe"],
     likes: 478, bookmarks: 289,
     relatedBooks: [
-      { title: "The Mathematical Universe", author: "Max Tegmark", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780307599803" },
-      { title: "A Mathematician's Apology", author: "G.H. Hardy", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781107604636" }
+      { title: "The Mathematical Universe", author: "Max Tegmark" },
+      { title: "A Mathematician's Apology", author: "G.H. Hardy" }
     ]
   },
   {
@@ -677,8 +677,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["education", "wealth", "wisdom", "knowledge", "success"],
     likes: 756, bookmarks: 489,
     relatedBooks: [
-      { title: "Poor Richard's Almanack", author: "Benjamin Franklin", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781626542747" },
-      { title: "The Benjamin Franklin Effect", author: "David McRaney", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781592408429" }
+      { title: "Poor Richard's Almanack", author: "Benjamin Franklin" },
+      { title: "The Benjamin Franklin Effect", author: "David McRaney" }
     ]
   },
 
@@ -695,8 +695,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["music", "culture", "philosophy", "art", "life"],
     likes: 892, bookmarks: 578,
     relatedBooks: [
-      { title: "The Birth of Tragedy", author: "Friedrich Nietzsche", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780679724650" },
-      { title: "Music and the Mind", author: "Anthony Storr", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780345383181" }
+      { title: "The Birth of Tragedy", author: "Friedrich Nietzsche" },
+      { title: "Music and the Mind", author: "Anthony Storr" }
     ]
   },
   {
@@ -710,8 +710,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["music", "emotion", "culture", "psychology", "art"],
     likes: 423, bookmarks: 256,
     relatedBooks: [
-      { title: "The Kreutzer Sonata", author: "Leo Tolstoy", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780140441673" },
-      { title: "This Is Your Brain on Music", author: "Daniel J. Levitin", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780452288522" }
+      { title: "The Kreutzer Sonata", author: "Leo Tolstoy" },
+      { title: "This Is Your Brain on Music", author: "Daniel J. Levitin" }
     ]
   },
 
@@ -727,8 +727,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["education", "creativity", "mind", "learning", "motivation"],
     likes: 698, bookmarks: 445,
     relatedBooks: [
-      { title: "A Whole New Mind", author: "Daniel H. Pink", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781594481710" },
-      { title: "The Element", author: "Ken Robinson", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780143116738" }
+      { title: "A Whole New Mind", author: "Daniel H. Pink" },
+      { title: "The Element", author: "Ken Robinson" }
     ]
   },
   {
@@ -742,8 +742,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["philosophy", "wisdom", "education", "knowledge", "humility"],
     likes: 612, bookmarks: 388,
     relatedBooks: [
-      { title: "Plato: Five Dialogues", author: "Plato", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780872200180" },
-      { title: "The Socratic Method", author: "Ward Farnsworth", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780226826707" }
+      { title: "Plato: Five Dialogues", author: "Plato" },
+      { title: "The Socratic Method", author: "Ward Farnsworth" }
     ]
   },
   {
@@ -757,8 +757,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["education", "learning", "wisdom", "knowledge", "experience"],
     likes: 589, bookmarks: 370,
     relatedBooks: [
-      { title: "The Art of Learning", author: "Josh Waitzkin", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780743277464" },
-      { title: "Make It Stick", author: "Peter C. Brown", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780674729018" }
+      { title: "The Art of Learning", author: "Josh Waitzkin" },
+      { title: "Make It Stick", author: "Peter C. Brown" }
     ]
   },
 
@@ -774,8 +774,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["sports", "discipline", "motivation", "courage", "strategy"],
     likes: 712, bookmarks: 445,
     relatedBooks: [
-      { title: "The Greatest: My Own Story", author: "Muhammad Ali", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780449142851" },
-      { title: "The Inner Game of Tennis", author: "W. Timothy Gallwey", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780679778318" }
+      { title: "The Greatest: My Own Story", author: "Muhammad Ali" },
+      { title: "The Inner Game of Tennis", author: "W. Timothy Gallwey" }
     ]
   },
   {
@@ -789,8 +789,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["sports", "discipline", "success", "preparation", "motivation"],
     likes: 534, bookmarks: 322,
     relatedBooks: [
-      { title: "Relentless", author: "Tim S. Grover", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781451688894" },
-      { title: "The Champion's Mind", author: "Jim Afremow", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781623363598" }
+      { title: "Relentless", author: "Tim S. Grover" },
+      { title: "The Champion's Mind", author: "Jim Afremow" }
     ]
   },
 
@@ -807,8 +807,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["love", "relationships", "vulnerability", "philosophy", "courage"],
     likes: 734, bookmarks: 489,
     relatedBooks: [
-      { title: "The Four Loves", author: "C.S. Lewis", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780156329309" },
-      { title: "Daring Greatly", author: "Brené Brown", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781592408412" }
+      { title: "The Four Loves", author: "C.S. Lewis" },
+      { title: "Daring Greatly", author: "Brené Brown" }
     ]
   },
   {
@@ -822,8 +822,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["love", "relationships", "life", "humanity", "warmth"],
     likes: 612, bookmarks: 389,
     relatedBooks: [
-      { title: "Audrey Hepburn: An Elegant Spirit", author: "Sean Hepburn Ferrer", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781476758817" },
-      { title: "All About Love", author: "bell hooks", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780060959470" }
+      { title: "Audrey Hepburn: An Elegant Spirit", author: "Sean Hepburn Ferrer" },
+      { title: "All About Love", author: "bell hooks" }
     ]
   },
 
@@ -839,8 +839,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["society", "change", "philosophy", "motivation", "leadership"],
     likes: 1024, bookmarks: 678,
     relatedBooks: [
-      { title: "Gandhi: An Autobiography", author: "Mahatma Gandhi", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780807059098" },
-      { title: "The Art of Nonviolent Communication", author: "Marshall B. Rosenberg", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781892005281" }
+      { title: "Gandhi: An Autobiography", author: "Mahatma Gandhi" },
+      { title: "The Art of Nonviolent Communication", author: "Marshall B. Rosenberg" }
     ]
   },
   {
@@ -855,8 +855,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["society", "justice", "politics", "history", "change"],
     likes: 889, bookmarks: 590,
     relatedBooks: [
-      { title: "Letter from Birmingham Jail", author: "Martin Luther King Jr.", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780063049130" },
-      { title: "Stride Toward Freedom", author: "Martin Luther King Jr.", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780807004593" }
+      { title: "Letter from Birmingham Jail", author: "Martin Luther King Jr." },
+      { title: "Stride Toward Freedom", author: "Martin Luther King Jr." }
     ]
   },
   {
@@ -870,8 +870,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["society", "gender", "history", "change", "culture"],
     likes: 678, bookmarks: 423,
     relatedBooks: [
-      { title: "A Midwife's Tale", author: "Laurel Thatcher Ulrich", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780679734697" },
-      { title: "Invisible Women", author: "Caroline Criado Perez", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781419735219" }
+      { title: "A Midwife's Tale", author: "Laurel Thatcher Ulrich" },
+      { title: "Invisible Women", author: "Caroline Criado Perez" }
     ]
   },
 
@@ -887,8 +887,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["wealth", "economics", "business", "mathematics", "success"],
     likes: 812, bookmarks: 534,
     relatedBooks: [
-      { title: "The Psychology of Money", author: "Morgan Housel", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780857197689" },
-      { title: "The Little Book of Common Sense Investing", author: "John C. Bogle", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781119404507" }
+      { title: "The Psychology of Money", author: "Morgan Housel" },
+      { title: "The Little Book of Common Sense Investing", author: "John C. Bogle" }
     ]
   },
   {
@@ -903,8 +903,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["success", "change", "economics", "motivation", "strategy"],
     likes: 623, bookmarks: 401,
     relatedBooks: [
-      { title: "The Way of the Peaceful Warrior", author: "Dan Millman", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781932073205" },
-      { title: "Good to Great", author: "Jim Collins", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780066620992" }
+      { title: "The Way of the Peaceful Warrior", author: "Dan Millman" },
+      { title: "Good to Great", author: "Jim Collins" }
     ]
   },
 
@@ -920,8 +920,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["health", "wellness", "wealth", "philosophy", "life"],
     likes: 634, bookmarks: 412,
     relatedBooks: [
-      { title: "Lifespan", author: "David Sinclair", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781501191978" },
-      { title: "Why We Sleep", author: "Matthew Walker", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781501144325" }
+      { title: "Lifespan", author: "David Sinclair" },
+      { title: "Why We Sleep", author: "Matthew Walker" }
     ]
   },
   {
@@ -935,8 +935,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["health", "wellness", "philosophy", "mind", "mindfulness"],
     likes: 512, bookmarks: 324,
     relatedBooks: [
-      { title: "Mindfulness in Plain English", author: "Bhante Gunaratana", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780861713417" },
-      { title: "Full Catastrophe Living", author: "Jon Kabat-Zinn", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780345536938" }
+      { title: "Mindfulness in Plain English", author: "Bhante Gunaratana" },
+      { title: "Full Catastrophe Living", author: "Jon Kabat-Zinn" }
     ]
   },
 
@@ -953,8 +953,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["innovation", "creativity", "entrepreneurship", "motivation", "technology"],
     likes: 978, bookmarks: 634,
     relatedBooks: [
-      { title: "Steve Jobs", author: "Walter Isaacson", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781451648539" },
-      { title: "Creative Confidence", author: "Tom Kelley & David Kelley", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780385349376" }
+      { title: "Steve Jobs", author: "Walter Isaacson" },
+      { title: "Creative Confidence", author: "Tom Kelley & David Kelley" }
     ]
   },
   {
@@ -968,8 +968,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["technology", "innovation", "futurism", "society", "inequality"],
     likes: 712, bookmarks: 456,
     relatedBooks: [
-      { title: "Neuromancer", author: "William Gibson", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780441569595" },
-      { title: "The Second Machine Age", author: "Brynjolfsson & McAfee", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780393350647" }
+      { title: "Neuromancer", author: "William Gibson" },
+      { title: "The Second Machine Age", author: "Brynjolfsson & McAfee" }
     ]
   },
   {
@@ -984,8 +984,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["innovation", "entrepreneurship", "motivation", "creativity", "technology"],
     likes: 889, bookmarks: 567,
     relatedBooks: [
-      { title: "The Innovation Stack", author: "Jim McKelvey", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780593084373" },
-      { title: "Originals", author: "Adam Grant", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780143128854" }
+      { title: "The Innovation Stack", author: "Jim McKelvey" },
+      { title: "Originals", author: "Adam Grant" }
     ]
   },
 
@@ -1001,8 +1001,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["creativity", "art", "film", "originality", "culture"],
     likes: 445, bookmarks: 278,
     relatedBooks: [
-      { title: "Steal Like an Artist", author: "Austin Kleon", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780761169253" },
-      { title: "Show Your Work", author: "Austin Kleon", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780761178972" }
+      { title: "Steal Like an Artist", author: "Austin Kleon" },
+      { title: "Show Your Work", author: "Austin Kleon" }
     ]
   },
   {
@@ -1016,8 +1016,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["innovation", "focus", "technology", "history", "resilience"],
     likes: 567, bookmarks: 356,
     relatedBooks: [
-      { title: "My Inventions: The Autobiography of Nikola Tesla", author: "Nikola Tesla", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781684117499" },
-      { title: "Tesla: Man Out of Time", author: "Margaret Cheney", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780743215367" }
+      { title: "My Inventions: The Autobiography of Nikola Tesla", author: "Nikola Tesla" },
+      { title: "Tesla: Man Out of Time", author: "Margaret Cheney" }
     ]
   },
 
@@ -1034,8 +1034,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["truth", "philosophy", "literature", "wisdom", "language"],
     likes: 534, bookmarks: 324,
     relatedBooks: [
-      { title: "The Importance of Being Earnest", author: "Oscar Wilde", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780486264783" },
-      { title: "How to Think", author: "Alan Jacobs", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780451499608" }
+      { title: "The Importance of Being Earnest", author: "Oscar Wilde" },
+      { title: "How to Think", author: "Alan Jacobs" }
     ]
   },
   {
@@ -1050,8 +1050,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["truth", "language", "philosophy", "literature", "power"],
     likes: 412, bookmarks: 245,
     relatedBooks: [
-      { title: "What is Literature?", author: "Jean-Paul Sartre", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780674950849" },
-      { title: "Politics and the English Language", author: "George Orwell", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780141393063" }
+      { title: "What is Literature?", author: "Jean-Paul Sartre" },
+      { title: "Politics and the English Language", author: "George Orwell" }
     ]
   },
 
@@ -1068,8 +1068,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["creativity", "logic", "science", "imagination", "intelligence"],
     likes: 823, bookmarks: 512,
     relatedBooks: [
-      { title: "The Art of Problem Solving", author: "Richard Rusczyk", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9781934124147" },
-      { title: "Lateral Thinking", author: "Edward de Bono", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780060903251" }
+      { title: "The Art of Problem Solving", author: "Richard Rusczyk" },
+      { title: "Lateral Thinking", author: "Edward de Bono" }
     ]
   },
   {
@@ -1083,8 +1083,8 @@ export const SEED_QUOTES: Quote[] = [
     tags: ["motivation", "failure", "success", "innovation", "resilience"],
     likes: 945, bookmarks: 612,
     relatedBooks: [
-      { title: "Edison: A Biography", author: "Matthew Josephson", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780471540595" },
-      { title: "Failing Forward", author: "John C. Maxwell", affiliateUrl: "https://bookshop.org/a/AFFILIATE/9780785288572" }
+      { title: "Edison: A Biography", author: "Matthew Josephson" },
+      { title: "Failing Forward", author: "John C. Maxwell" }
     ]
   },
 

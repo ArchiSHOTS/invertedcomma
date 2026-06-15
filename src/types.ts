@@ -1,7 +1,6 @@
 export interface RelatedBook {
   title: string;
   author: string;
-  affiliateUrl: string;
   coverHint?: string;
 }
 

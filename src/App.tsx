@@ -189,19 +189,7 @@ function HomePage() {
     return matchesTag && matchesSearch;
   });
 
-  // Inject sponsored card at position 7 in grid
-  const gridQuotes = (() => {
-    if (activeView !== "grid" || filteredQuotes.length < 8) return filteredQuotes;
-    const sponsored: Quote = {
-      id: "sponsored-1", slug: "sponsored-1",
-      text: "Discover the books behind history's greatest minds. Independent bookshops. Affiliate links.",
-      author: "Bookshop.org", category: "Sponsored", tags: [], likes: 0, bookmarks: 0,
-      sponsored: true, sponsorLabel: "Partner", sponsorUrl: "https://bookshop.org",
-    };
-    const result = [...filteredQuotes];
-    result.splice(7, 0, sponsored);
-    return result;
-  })();
+  const gridQuotes = filteredQuotes;
 
   const topTags = [...tags].sort((a, b) => b.count - a.count).filter((t) => t.count > 0);
 

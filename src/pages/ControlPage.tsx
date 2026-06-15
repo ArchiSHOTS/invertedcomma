@@ -341,7 +341,7 @@ const SOURCE_TYPE_CONFIG: Record<string, {
     fields: [
       { key: "sourceName", label: "Book title", placeholder: "e.g. Man's Search for Meaning" },
       { key: "sourceAuthor", label: "Book author", placeholder: "e.g. Viktor Frankl", hint: "If different from quote author" },
-      { key: "sourceUrl", label: "Buy / read link", placeholder: "https://bookshop.org/…", hint: "Bookshop.org, Amazon, Goodreads, etc." },
+      { key: "sourceUrl", label: "Buy / read link", placeholder: "https://…", hint: "Amazon, Goodreads, publisher page, etc." },
     ],
   },
   movie: {

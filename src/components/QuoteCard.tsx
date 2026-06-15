@@ -212,17 +212,13 @@ export default function QuoteCard({
         <div className="flex items-center gap-3 px-5 py-2.5 border-t border-stone-100 bg-stone-50/60">
           <span className="text-[9px] font-bold uppercase tracking-wider text-stone-400 flex-shrink-0">Read:</span>
           {quote.relatedBooks.slice(0, 2).map((book) => (
-            <a
+            <span
               key={book.title}
-              href={book.affiliateUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              className="flex items-center gap-1 text-[10px] text-stone-500 hover:text-stone-800 hover:underline transition-colors font-medium truncate"
+              className="flex items-center gap-1 text-[10px] text-stone-500 font-medium truncate"
             >
               <BookOpen className="w-2.5 h-2.5 flex-shrink-0" />
               <span className="truncate max-w-[110px]">{book.title}</span>
-            </a>
+            </span>
           ))}
         </div>
       )}

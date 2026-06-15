@@ -841,11 +841,6 @@ export default function QuotePage() {
                               <p className="font-serif font-semibold text-sm text-stone-800 leading-tight mb-0.5">{book.title}</p>
                               <p className="text-[11px] text-stone-400 mb-2">{book.author}</p>
                               <div className="flex flex-wrap gap-1.5">
-                                {book.affiliateUrl && (
-                                  <a href={book.affiliateUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 h-6 px-2.5 rounded-full bg-stone-100 hover:bg-stone-200 text-[10px] text-stone-500 transition-colors">
-                                    <BookOpen className="w-2.5 h-2.5" /> Bookshop.org
-                                  </a>
-                                )}
                                 <a href={amazonUrl(book.title, book.author, "com")} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 h-6 px-2.5 rounded-full bg-orange-50 hover:bg-orange-100 text-[10px] text-orange-600 transition-colors">
                                   <ShoppingCart className="w-2.5 h-2.5" /> Amazon.com
                                 </a>
@@ -867,7 +862,7 @@ export default function QuotePage() {
                       </div>
 
                       <p className="text-[9px] text-stone-400 font-mono">
-                        Bookshop.org links support independent bookshops. Amazon links may contain affiliate tags.
+                        Amazon links may contain affiliate tags.
                       </p>
                     </section>
                   )}
