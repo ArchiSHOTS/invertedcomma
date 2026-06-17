@@ -377,15 +377,17 @@ export async function upsertAuthor(a: {
 // RUNTIME QUOTES
 // ─────────────────────────────────────────────────────────────────────────────
 
-// In-memory cache for the full runtime_quotes table. This table is read on
-// nearly every request (page views, social-preview crawlers, OG image
-// generation), so without a cache each one triggers a full-table SELECT
-// (including the potentially-large `enrichment` JSONB column). A short TTL
-// keeps reads cheap while staying close to real-time for admin edits.
+// In-memory cache for the PUBLISHED runtime_quotes (the public hot path: page
+// views, social-preview crawlers, OG image generation). It deliberately does
+// NOT load pending/rejected rows — unmoderated Wikiquote imports can number in
+// the thousands and the public never sees them, yet they used to be transferred
+// from Neon on every read. The admin moderation queue uses getAllRuntimeQuotes().
 let runtimeQuotesCache: { rows: any[]; expiresAt: number } | null = null;
-// 5 min: every admin write (create/update/bulk) calls invalidateRuntimeQuotesCache(),
-// so a long TTL stays accurate while drastically cutting full-table reads to Neon.
-const RUNTIME_QUOTES_CACHE_TTL_MS = 300_000;
+// 1 hour: every admin content write (create/update/bulk/delete) calls
+// invalidateRuntimeQuotesCache(), so a long TTL stays accurate while cutting
+// full-list reads to Neon ~12x vs the old 5-min TTL. (Like/bookmark counts in
+// the list can lag up to the TTL — acceptable, and they were never real-time.)
+const RUNTIME_QUOTES_CACHE_TTL_MS = 3_600_000;
 
 function invalidateRuntimeQuotesCache() {
   runtimeQuotesCache = null;
@@ -399,10 +401,13 @@ const LIST_COLS =
   "id, slug, text, author, source, source_url, year, category, context, " +
   "tags, source_type, status, submitted_by, likes, bookmarks, created_at";
 
-export async function getRuntimeQuotes(status?: string) {
+// PUBLISHED quotes only — the public hot path. Cached (see TTL above).
+export async function getRuntimeQuotes() {
   if (!runtimeQuotesCache || runtimeQuotesCache.expiresAt < Date.now()) {
     try {
-      const { rows } = await pool.query(`SELECT ${LIST_COLS} FROM runtime_quotes ORDER BY created_at DESC`);
+      const { rows } = await pool.query(
+        `SELECT ${LIST_COLS} FROM runtime_quotes WHERE status = 'published' ORDER BY created_at DESC`
+      );
       runtimeQuotesCache = {
         rows: rows.map((r: any) => ({ ...r, tags: r.tags ?? [] })),
         expiresAt: Date.now() + RUNTIME_QUOTES_CACHE_TTL_MS,
@@ -418,7 +423,26 @@ export async function getRuntimeQuotes(status?: string) {
       };
     }
   }
-  return status ? runtimeQuotesCache.rows.filter((r: any) => r.status === status) : runtimeQuotesCache.rows;
+  return runtimeQuotesCache.rows;
+}
+
+// ALL statuses (incl. pending/rejected) — admin moderation queue only. Not
+// cached: it's low-frequency and must reflect moderation actions immediately.
+export async function getAllRuntimeQuotes() {
+  const { rows } = await pool.query(
+    `SELECT ${LIST_COLS} FROM runtime_quotes ORDER BY created_at DESC`
+  );
+  return rows.map((r: any) => ({ ...r, tags: r.tags ?? [] }));
+}
+
+// Counts per status — for admin stats, so we never fetch full rows just to count.
+export async function getRuntimeQuoteStatusCounts(): Promise<Record<string, number>> {
+  const { rows } = await pool.query<{ status: string; n: number }>(
+    "SELECT status, COUNT(*)::int AS n FROM runtime_quotes GROUP BY status"
+  );
+  const out: Record<string, number> = {};
+  for (const r of rows) out[r.status] = r.n;
+  return out;
 }
 
 export async function getRuntimeQuoteBySlug(slug: string) {

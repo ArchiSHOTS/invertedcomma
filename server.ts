@@ -47,7 +47,8 @@ import {
   getUserById, getUserByEmail, getUserByHandle, getAllUsers,
   createUser, updateUser, deleteUser, toggleBookmark,
   getAuthorBySlug, getAllAuthors, upsertAuthor,
-  getRuntimeQuotes, getRuntimeQuoteBySlug, getRuntimeQuoteEnrichment, createRuntimeQuote,
+  getRuntimeQuotes, getAllRuntimeQuotes, getRuntimeQuoteStatusCounts,
+  getRuntimeQuoteBySlug, getRuntimeQuoteEnrichment, createRuntimeQuote,
   updateRuntimeQuote, deleteRuntimeQuote, bulkSetRuntimeQuoteStatus, bulkEditRuntimeQuotes,
   getComments, createComment, likeComment, deleteComment, getAllComments,
   addSubscriber, getAllSubscribers, setSubscriberStatus,
@@ -614,7 +615,7 @@ function dispatchVerification(user: { id: string; email: string; displayName?: s
 
 /** Pick a published quote matching one of the user's interests (random fallback). */
 async function pickWelcomeQuote(interests: string[] = []): Promise<WelcomeQuote | null> {
-  const dbRQ = await getRuntimeQuotes("published");
+  const dbRQ = await getRuntimeQuotes();
   const all  = [...getEnrichedQuotes(), ...dbRQ] as any[];
   if (!all.length) return null;
 
@@ -1051,7 +1052,7 @@ app.get("/api/user/:handle", async (req, res) => {
 app.get("/api/user/:handle/quotes", async (req, res) => {
   const user = await getUserByHandle(req.params.handle);
   if (!user) return res.status(404).json({ error: "User not found" });
-  const dbRQ  = await getRuntimeQuotes("published");
+  const dbRQ  = await getRuntimeQuotes();
   const allQuotes = [...getEnrichedQuotes(), ...dbRQ];
   const saved = allQuotes.filter(q => (user.savedQuoteIds || []).includes(q.id));
   res.json({ quotes: saved });
@@ -1060,7 +1061,7 @@ app.get("/api/user/:handle/quotes", async (req, res) => {
 // ── Author endpoints ──────────────────────────────────────────────────────────
 
 app.get("/api/authors", async (req, res) => {
-  const dbRQ  = await getRuntimeQuotes("published");
+  const dbRQ  = await getRuntimeQuotes();
   const allQuotes = [...getEnrichedQuotes(), ...dbRQ];
   const names = Array.from(new Set(allQuotes.map((q: any) => q.author as string))).sort();
   const dbAuthors = await getAllAuthors();
@@ -1078,7 +1079,7 @@ app.get("/api/authors", async (req, res) => {
 app.get("/api/author/:slug", async (req, res) => {
   const { slug } = req.params;
   let profile    = await getAuthorBySlug(slug);
-  const dbRQ     = await getRuntimeQuotes("published");
+  const dbRQ     = await getRuntimeQuotes();
   const allQuotes = [...getEnrichedQuotes(), ...dbRQ];
 
   const authorName = profile?.name || allQuotes.find((q: any) => authorSlug(q.author) === slug)?.author;
@@ -1126,7 +1127,7 @@ app.get("/api/quotes", async (req, res) => {
   // quotes rather than blanking the page (or crashing on an async rejection).
   let dbRQ: Awaited<ReturnType<typeof getRuntimeQuotes>> = [];
   try {
-    dbRQ = await getRuntimeQuotes("published");
+    dbRQ = await getRuntimeQuotes();
   } catch (e: any) {
     console.error("[quotes] DB read failed, serving seed quotes only:", e?.message);
   }
@@ -1360,7 +1361,9 @@ app.post("/api/admin/quotes/:id/reject", adminMiddleware, async (req, res) => {
 });
 
 app.get("/api/admin/quotes", adminMiddleware, async (req, res) => {
-  const quotes = await getRuntimeQuotes();
+  // Moderation queue needs every status (incl. pending imports), so read all
+  // rows directly rather than the published-only public cache.
+  const quotes = await getAllRuntimeQuotes();
   res.json({ quotes, total: quotes.length });
 });
 
@@ -1421,9 +1424,10 @@ app.delete("/api/admin/users/:id", superAdminMiddleware, async (req: any, res) =
 
 app.get("/api/admin/stats", adminMiddleware, async (req, res) => {
   const allSeed   = getEnrichedQuotes();
-  const rq        = await getRuntimeQuotes();
-  const pending   = rq.filter(q => q.status === "pending").length;
-  const published = allSeed.length + rq.filter(q => q.status === "published").length;
+  // Count by status with a GROUP BY instead of transferring every row to count them.
+  const counts    = await getRuntimeQuoteStatusCounts();
+  const pending   = counts.pending || 0;
+  const published = allSeed.length + (counts.published || 0);
 
   // Use lightweight COUNT queries instead of fetching all records just to count them.
   // This saves significant bandwidth on stats lookups.
@@ -2138,7 +2142,7 @@ function registerSocialMetaRoutes(renderShell: (url: string) => Promise<string>)
   app.get("/q/:slug", async (req, res, next) => {
     try {
       const all   = getEnrichedQuotes() as any[];
-      const rq    = await getRuntimeQuotes("published");
+      const rq    = await getRuntimeQuotes();
       const quote = [...all, ...rq].find((q: any) => q.slug === req.params.slug);
       if (!quote) return next();
       const shortText = quote.text.length > 120 ? quote.text.slice(0, 118) + "…" : quote.text;
@@ -2158,7 +2162,7 @@ function registerSocialMetaRoutes(renderShell: (url: string) => Promise<string>)
       const slug   = req.params.slug;
       const author = await getAuthorBySlug(slug);
       const all    = getEnrichedQuotes() as any[];
-      const rq     = await getRuntimeQuotes("published");
+      const rq     = await getRuntimeQuotes();
       const quoteCount = [...all, ...rq].filter((q: any) =>
         (q.author || "").toLowerCase().replace(/[^a-z0-9]+/g, "-") === slug
       ).length;
@@ -2292,7 +2296,7 @@ app.get("/api/og/quote/:slug", async (req, res) => {
     return res.send(ogCache.get(cacheKey)!);
   }
   const all   = getEnrichedQuotes() as any[];
-  const rq    = await getRuntimeQuotes("published");
+  const rq    = await getRuntimeQuotes();
   const quote = [...all, ...rq].find((q: any) => q.slug === req.params.slug);
   if (!quote) return res.status(404).json({ error: "Quote not found" });
   try { sendOg(res, buildQuoteOg(quote), cacheKey); } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -2317,7 +2321,7 @@ app.get("/api/og/author/:slug", async (req, res) => {
   }
   const author = await getAuthorBySlug(slug);
   const all    = getEnrichedQuotes() as any[];
-  const rq     = await getRuntimeQuotes("published");
+  const rq     = await getRuntimeQuotes();
   const quoteCount = [...all, ...rq].filter((q: any) =>
     (q.author || "").toLowerCase().replace(/[^a-z0-9]+/g, "-") === slug
   ).length;
