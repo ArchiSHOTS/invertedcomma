@@ -15,4 +15,11 @@ data/runtime-quotes.json
 
 # Database dumps — prevent accidental commits of PII
 *.sql
+*.dump
+
+# Internal reference / summary docs — local only, may expose architecture details
 PROJECT.md
+TASKS.md
+EGRESS-HANDOFF.md
+*HANDOFF*.md
+*SUMMARY*.md
