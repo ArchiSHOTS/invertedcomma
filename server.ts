@@ -47,9 +47,10 @@ import {
   getUserById, getUserByEmail, getUserByHandle, getAllUsers,
   createUser, updateUser, deleteUser, toggleBookmark,
   getAuthorBySlug, getAllAuthors, upsertAuthor,
-  getRuntimeQuotes, getAllRuntimeQuotes, getRuntimeQuoteStatusCounts,
+  getAllRuntimeQuotesPaginated, getRuntimeQuoteStatusCounts,
   getRuntimeQuoteBySlug, getRuntimeQuoteEnrichment, createRuntimeQuote,
   updateRuntimeQuote, deleteRuntimeQuote, bulkSetRuntimeQuoteStatus, bulkEditRuntimeQuotes,
+  deletePendingWikiquoteQuotes,
   getComments, createComment, likeComment, deleteComment, getAllComments,
   addSubscriber, getAllSubscribers, setSubscriberStatus,
   getUserCount, getSubscriberCount, getUserCountByRole,
@@ -61,6 +62,16 @@ import {
 } from "./db.ts";
 import { sendVerificationEmail, sendWelcomeEmail, sendSubscriberWelcomeEmail, type WelcomeQuote } from "./email.ts";
 import { importWikiquote, importStatus } from "./wikiquote.ts";
+import {
+  getPublishedSnapshot,
+  getPublishedTagsIndex,
+  resolvePublishedQuote,
+  paginateQuotesList,
+  normalizeDbRow,
+  buildTagsIndex,
+  type QuotesQueryParams,
+} from "./published-snapshot.ts";
+import { getEgressMetrics, recordEndpointDbRead } from "./egress-metrics.ts";
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
@@ -325,22 +336,38 @@ async function generateGemini(contents: string | any[], config: Record<string, a
     const { responseMimeType, ...rest } = config;
     geminiConfig = rest;
   }
-  const models = aiConfig.geminiModel ? [aiConfig.geminiModel] : GEMINI_MODELS;
+  // Try the pinned model first, then the rest of the default chain as fallbacks
+  // (deduped). Pinning a model in the dashboard must not disable resilience: a
+  // transient 503/429 on the selected model should still fall back rather than
+  // hard-fail (heavy grounded calls like Anatomy are the first to be shed under load).
+  const models = aiConfig.geminiModel
+    ? [aiConfig.geminiModel, ...GEMINI_MODELS.filter(m => m !== aiConfig.geminiModel)]
+    : [...GEMINI_MODELS];
   let lastErr: any;
   for (const model of models) {
-    try {
-      const res = await geminiClient.models.generateContent({ model, contents, config: geminiConfig });
-      if (models.indexOf(model) > 0) console.log(`[Gemini] Used fallback model: ${model}`);
-      return res;
-    } catch (err: any) {
-      let status: number | undefined;
-      try { status = JSON.parse(err.message || "{}").error?.code; } catch {}
-      if (status === 503 || status === 429) {
-        console.warn(`[Gemini] ${model} unavailable (${status}), trying next...`);
+    // One in-place retry on a transient 503 (high-demand shedding) before moving
+    // on — these clear in ~1s. A 429 is not retried on the same model (it would
+    // just burn the same quota); we fall straight through to the next model.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await geminiClient.models.generateContent({ model, contents, config: geminiConfig });
+        if (models.indexOf(model) > 0 || attempt > 0) console.log(`[Gemini] Succeeded on ${model} (attempt ${attempt + 1})`);
+        return res;
+      } catch (err: any) {
+        let status: number | undefined;
+        try { status = JSON.parse(err.message || "{}").error?.code; } catch {}
         lastErr = err;
-        continue;
+        if (status === 503 && attempt === 0) {
+          console.warn(`[Gemini] ${model} overloaded (503), retrying once...`);
+          await new Promise(r => setTimeout(r, 900));
+          continue; // retry same model
+        }
+        if (status === 503 || status === 429) {
+          console.warn(`[Gemini] ${model} unavailable (${status}), trying next model...`);
+          break; // move to next model in the chain
+        }
+        throw err; // non-transient (bad key, quota-exhausted, etc.) — surface immediately
       }
-      throw err;
     }
   }
   throw lastErr;
@@ -615,8 +642,7 @@ function dispatchVerification(user: { id: string; email: string; displayName?: s
 
 /** Pick a published quote matching one of the user's interests (random fallback). */
 async function pickWelcomeQuote(interests: string[] = []): Promise<WelcomeQuote | null> {
-  const dbRQ = await getRuntimeQuotes();
-  const all  = [...getEnrichedQuotes(), ...dbRQ] as any[];
+  const all = await getPublishedSnapshot();
   if (!all.length) return null;
 
   const set = new Set((interests || []).map(s => s.toLowerCase()));
@@ -1052,8 +1078,7 @@ app.get("/api/user/:handle", async (req, res) => {
 app.get("/api/user/:handle/quotes", async (req, res) => {
   const user = await getUserByHandle(req.params.handle);
   if (!user) return res.status(404).json({ error: "User not found" });
-  const dbRQ  = await getRuntimeQuotes();
-  const allQuotes = [...getEnrichedQuotes(), ...dbRQ];
+  const allQuotes = await getPublishedSnapshot();
   const saved = allQuotes.filter(q => (user.savedQuoteIds || []).includes(q.id));
   res.json({ quotes: saved });
 });
@@ -1061,14 +1086,13 @@ app.get("/api/user/:handle/quotes", async (req, res) => {
 // ── Author endpoints ──────────────────────────────────────────────────────────
 
 app.get("/api/authors", async (req, res) => {
-  const dbRQ  = await getRuntimeQuotes();
-  const allQuotes = [...getEnrichedQuotes(), ...dbRQ];
-  const names = Array.from(new Set(allQuotes.map((q: any) => q.author as string))).sort();
+  const allQuotes = await getPublishedSnapshot();
+  const names = Array.from(new Set(allQuotes.map((q) => q.author))).sort();
   const dbAuthors = await getAllAuthors();
   const result = names.map(name => {
     const slug     = authorSlug(name);
     const existing = dbAuthors.find(a => a.slug === slug);
-    const quoteCount = allQuotes.filter((q: any) => q.author === name).length;
+    const quoteCount = allQuotes.filter((q) => q.author === name).length;
     return existing
       ? { ...existing, quoteCount }
       : { id: slug, slug, name, bio: "", quoteCount, autoGenerated: false };
@@ -1079,10 +1103,9 @@ app.get("/api/authors", async (req, res) => {
 app.get("/api/author/:slug", async (req, res) => {
   const { slug } = req.params;
   let profile    = await getAuthorBySlug(slug);
-  const dbRQ     = await getRuntimeQuotes();
-  const allQuotes = [...getEnrichedQuotes(), ...dbRQ];
+  const allQuotes = await getPublishedSnapshot();
 
-  const authorName = profile?.name || allQuotes.find((q: any) => authorSlug(q.author) === slug)?.author;
+  const authorName = profile?.name || allQuotes.find((q) => authorSlug(q.author) === slug)?.author;
   if (!authorName) return res.status(404).json({ error: "Author not found" });
 
   if (!profile || !profile.bio) {
@@ -1093,16 +1116,15 @@ app.get("/api/author/:slug", async (req, res) => {
     }
   }
 
-  const quotes = allQuotes.filter((q: any) => q.author === authorName);
+  const quotes = allQuotes.filter((q) => q.author === authorName);
   res.json({ author: profile || { id: slug, slug, name: authorName, bio: "" }, quotes });
 });
 
 app.put("/api/author/:slug", adminMiddleware, async (req: any, res) => {
   const { slug } = req.params;
   const updates  = req.body;
-  const dbRQ     = await getRuntimeQuotes();
-  const allQuotes = [...getEnrichedQuotes(), ...dbRQ];
-  const name     = updates.name || allQuotes.find((q: any) => authorSlug(q.author) === slug)?.author || slug;
+  const allQuotes = await getPublishedSnapshot();
+  const name     = updates.name || allQuotes.find((q) => authorSlug(q.author) === slug)?.author || slug;
   const saved    = await upsertAuthor({ slug, name, ...updates, autoGenerated: false });
   res.json({ author: saved });
 });
@@ -1110,9 +1132,8 @@ app.put("/api/author/:slug", adminMiddleware, async (req: any, res) => {
 app.post("/api/author/:slug/regenerate", adminMiddleware, async (req: any, res) => {
   const { slug } = req.params;
   const existing = await getAuthorBySlug(slug);
-  const dbRQ     = await getRuntimeQuotes();
-  const allQuotes = [...getEnrichedQuotes(), ...dbRQ];
-  const authorName = existing?.name || allQuotes.find((q: any) => authorSlug(q.author) === slug)?.author;
+  const allQuotes = await getPublishedSnapshot();
+  const authorName = existing?.name || allQuotes.find((q) => authorSlug(q.author) === slug)?.author;
   if (!authorName) return res.status(404).json({ error: "Author not found" });
   res.json({ status: "generating" });
   generateAuthorProfile(authorName).then(async generated => {
@@ -1122,43 +1143,95 @@ app.post("/api/author/:slug/regenerate", adminMiddleware, async (req: any, res) 
 
 // ── Quotes endpoints ──────────────────────────────────────────────────────────
 
-app.get("/api/quotes", async (req, res) => {
-  // Degrade gracefully: if the DB read fails, still serve the code-backed seed
-  // quotes rather than blanking the page (or crashing on an async rejection).
-  let dbRQ: Awaited<ReturnType<typeof getRuntimeQuotes>> = [];
+app.get("/api/quotes/facets", async (_req, res) => {
+  recordEndpointDbRead("/api/quotes/facets");
   try {
-    dbRQ = await getRuntimeQuotes();
+    const all = await getPublishedSnapshot();
+    const sourceTypeCounts: Record<string, number> = {};
+    const categoryCounts: Record<string, number> = {};
+    for (const q of all) {
+      const st = q.sourceType ?? "book";
+      sourceTypeCounts[st] = (sourceTypeCounts[st] || 0) + 1;
+      categoryCounts[q.category] = (categoryCounts[q.category] || 0) + 1;
+    }
+    const topTags = buildTagsIndex(all).slice(0, 30);
+    res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=3600");
+    res.json({ sourceTypeCounts, categoryCounts, topTags, total: all.length });
   } catch (e: any) {
-    console.error("[quotes] DB read failed, serving seed quotes only:", e?.message);
+    console.error("[facets] snapshot read failed:", e?.message);
+    res.status(500).json({ error: "Failed to load facets" });
   }
-  res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
-  res.json({ quotes: [...getEnrichedQuotes(), ...dbRQ] });
 });
 
-app.get("/api/tags", (req, res) => {
-  const quotes = getEnrichedQuotes();
-  const tagCounts: Record<string, number> = {};
-  quotes.forEach((q) => q.tags.forEach((tag) => { tagCounts[tag] = (tagCounts[tag] || 0) + 1; }));
-  AVAILABLE_TAGS.forEach((tag) => { if (!tagCounts[tag]) tagCounts[tag] = 0; });
-  res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=3600");
-  res.json({ tags: Object.entries(tagCounts).map(([name, count]) => ({ name, count })) });
+app.get("/api/quotes", async (req, res) => {
+  recordEndpointDbRead("/api/quotes");
+  try {
+    const params: QuotesQueryParams = {
+      page: req.query.page ? Number(req.query.page) : undefined,
+      limit: req.query.limit ? Number(req.query.limit) : undefined,
+      tag: typeof req.query.tag === "string" ? req.query.tag : undefined,
+      category: typeof req.query.category === "string" ? req.query.category : undefined,
+      sourceType: typeof req.query.sourceType === "string" ? req.query.sourceType : undefined,
+      author: typeof req.query.author === "string" ? req.query.author : undefined,
+      search: typeof req.query.search === "string" ? req.query.search : undefined,
+      slim: req.query.slim === "0" ? false : true,
+    };
+    const all = await getPublishedSnapshot();
+    const hasPagination =
+      params.page !== undefined ||
+      params.limit !== undefined ||
+      params.tag ||
+      params.category ||
+      params.sourceType ||
+      params.author ||
+      params.search;
+
+    if (hasPagination) {
+      const result = paginateQuotesList(all, {
+        ...params,
+        page: params.page ?? 1,
+        limit: params.limit ?? 24,
+      });
+      res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=3600");
+      return res.json(result);
+    }
+
+    // No query params: default to first page (avoids shipping the full catalog).
+    const result = paginateQuotesList(all, { page: 1, limit: 24 });
+    res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
+    return res.json(result);
+  } catch (e: any) {
+    console.error("[quotes] snapshot read failed, serving seed quotes only:", e?.message);
+    const seeds = getEnrichedQuotes();
+    res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
+    res.json({ quotes: seeds, total: seeds.length, page: 1, limit: seeds.length, totalPages: 1 });
+  }
+});
+
+app.get("/api/tags", async (req, res) => {
+  recordEndpointDbRead("/api/tags");
+  try {
+    const tags = await getPublishedTagsIndex();
+    res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=3600");
+    res.json({ tags });
+  } catch (e: any) {
+    console.error("[tags] snapshot read failed:", e?.message);
+    const quotes = getEnrichedQuotes();
+    const tagCounts: Record<string, number> = {};
+    quotes.forEach((q) => q.tags.forEach((tag) => { tagCounts[tag] = (tagCounts[tag] || 0) + 1; }));
+    AVAILABLE_TAGS.forEach((tag) => { if (!tagCounts[tag]) tagCounts[tag] = 0; });
+    res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=3600");
+    res.json({ tags: Object.entries(tagCounts).map(([name, count]) => ({ name, count })) });
+  }
 });
 
 app.get("/api/quotes/:slugOrId", async (req, res) => {
   const { slugOrId } = req.params;
-  const seed  = getEnrichedQuotes();
-  const seedQ = seed.find((q) => q.slug === slugOrId || q.id === slugOrId);
+  recordEndpointDbRead("/api/quotes/:slugOrId");
+  const seedQ = getEnrichedQuotes().find((q) => q.slug === slugOrId || q.id === slugOrId);
   if (seedQ) return res.json({ quote: seedQ });
-  // Serve runtime quotes from the cached list (5-min TTL, no enrichment JSONB).
-  // The detail page never reads `enrichment` — insights are fetched separately —
-  // so this avoids an uncached SELECT * (incl. the heavy JSONB) on every view.
-  let rq: any = null;
-  try {
-    rq = (await getRuntimeQuotes()).find((q: any) => q.slug === slugOrId || q.id === slugOrId);
-  } catch (e: any) {
-    console.error("[quote] DB read failed:", e?.message);
-  }
-  if (!rq)  return res.status(404).json({ error: "Quote not found" });
+  const rq = await resolvePublishedQuote(slugOrId);
+  if (!rq) return res.status(404).json({ error: "Quote not found" });
   res.json({ quote: rq });
 });
 
@@ -1361,10 +1434,37 @@ app.post("/api/admin/quotes/:id/reject", adminMiddleware, async (req, res) => {
 });
 
 app.get("/api/admin/quotes", adminMiddleware, async (req, res) => {
-  // Moderation queue needs every status (incl. pending imports), so read all
-  // rows directly rather than the published-only public cache.
-  const quotes = await getAllRuntimeQuotes();
-  res.json({ quotes, total: quotes.length });
+  recordEndpointDbRead("/api/admin/quotes");
+  const page = req.query.page ? Number(req.query.page) : 1;
+  const limit = req.query.limit ? Number(req.query.limit) : 50;
+  const status = typeof req.query.status === "string" ? req.query.status : undefined;
+  const sourceType = typeof req.query.sourceType === "string" ? req.query.sourceType : undefined;
+  const category = typeof req.query.category === "string" ? req.query.category : undefined;
+  const search = typeof req.query.search === "string" ? req.query.search : undefined;
+  const result = await getAllRuntimeQuotesPaginated({
+    page, limit, status, sourceType, category, search,
+  });
+  res.json({
+    quotes: result.quotes.map(normalizeDbRow),
+    total: result.total,
+    page: result.page,
+    limit: result.limit,
+    totalPages: result.totalPages,
+  });
+});
+
+app.post("/api/admin/quotes/bulk/delete-pending-wikiquote", adminMiddleware, async (_req, res) => {
+  const deleted = await deletePendingWikiquoteQuotes();
+  res.json({ ok: true, deleted });
+});
+
+app.get("/api/admin/egress-stats", adminMiddleware, async (_req, res) => {
+  const statusCounts = await getRuntimeQuoteStatusCounts();
+  res.json({
+    ...getEgressMetrics(),
+    quoteStatusCounts: statusCounts,
+    verificationGuide: "See EGRESS-VERIFICATION.md",
+  });
 });
 
 app.delete("/api/admin/quotes/:id", adminMiddleware, async (req, res) => {
@@ -1824,7 +1924,7 @@ app.get("/api/quotes/:quoteId/insights", async (req, res) => {
   const seedQ       = allSeed.find((q: any) => q.id === quoteId);
   // Resolve runtime quotes from the cached list (no enrichment) to avoid a
   // SELECT * on every insights request/poll.
-  const runtimeQ    = seedQ ? null : (await getRuntimeQuotes()).find((q: any) => q.id === quoteId || q.slug === quoteId);
+  const runtimeQ    = seedQ ? null : await resolvePublishedQuote(quoteId);
   const quote       = seedQ ?? runtimeQ;
   if (!quote) return res.status(404).json({ error: "Quote not found" });
 
@@ -2141,9 +2241,7 @@ function injectMetaTags(html: string, meta: MetaTags): string {
 function registerSocialMetaRoutes(renderShell: (url: string) => Promise<string>) {
   app.get("/q/:slug", async (req, res, next) => {
     try {
-      const all   = getEnrichedQuotes() as any[];
-      const rq    = await getRuntimeQuotes();
-      const quote = [...all, ...rq].find((q: any) => q.slug === req.params.slug);
+      const quote = await resolvePublishedQuote(req.params.slug);
       if (!quote) return next();
       const shortText = quote.text.length > 120 ? quote.text.slice(0, 118) + "…" : quote.text;
       const html = await renderShell(req.originalUrl);
@@ -2161,9 +2259,8 @@ function registerSocialMetaRoutes(renderShell: (url: string) => Promise<string>)
     try {
       const slug   = req.params.slug;
       const author = await getAuthorBySlug(slug);
-      const all    = getEnrichedQuotes() as any[];
-      const rq     = await getRuntimeQuotes();
-      const quoteCount = [...all, ...rq].filter((q: any) =>
+      const all    = await getPublishedSnapshot();
+      const quoteCount = all.filter((q) =>
         (q.author || "").toLowerCase().replace(/[^a-z0-9]+/g, "-") === slug
       ).length;
       const name = author?.name || slug.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
@@ -2295,9 +2392,7 @@ app.get("/api/og/quote/:slug", async (req, res) => {
     res.setHeader("Content-Type", "image/png"); res.setHeader("Cache-Control", "public, max-age=86400");
     return res.send(ogCache.get(cacheKey)!);
   }
-  const all   = getEnrichedQuotes() as any[];
-  const rq    = await getRuntimeQuotes();
-  const quote = [...all, ...rq].find((q: any) => q.slug === req.params.slug);
+  const quote = await resolvePublishedQuote(req.params.slug);
   if (!quote) return res.status(404).json({ error: "Quote not found" });
   try { sendOg(res, buildQuoteOg(quote), cacheKey); } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
@@ -2320,9 +2415,8 @@ app.get("/api/og/author/:slug", async (req, res) => {
     return res.send(ogCache.get(cacheKey)!);
   }
   const author = await getAuthorBySlug(slug);
-  const all    = getEnrichedQuotes() as any[];
-  const rq     = await getRuntimeQuotes();
-  const quoteCount = [...all, ...rq].filter((q: any) =>
+  const all    = await getPublishedSnapshot();
+  const quoteCount = all.filter((q) =>
     (q.author || "").toLowerCase().replace(/[^a-z0-9]+/g, "-") === slug
   ).length;
   const authorData = author
