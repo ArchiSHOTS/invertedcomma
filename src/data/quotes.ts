@@ -2178,20 +2178,9 @@ export const SEED_QUOTES: Quote[] = [
     likes: 0, bookmarks: 0,
   },
 
-  // ── MOVIES (movie-new-1 … movie-new-20) ───────────────────────────────────
-  {
-    id: "movie-new-1",
-    slug: "hope-is-a-good-thing-shawshank",
-    text: "Hope is a good thing, maybe the best of things, and no good thing ever dies.",
-    author: "Frank Darabont",
-    source: "The Shawshank Redemption",
-    year: 1994,
-    sourceType: "movie",
-    category: "Motivation & Success",
-    context: "Andy Dufresne leaves this message for Red in a letter hidden beneath a volcanic rock. The line, adapted from Stephen King's novella, became one of cinema's most enduring statements about human resilience.",
-    tags: ["hope", "resilience", "freedom", "friendship", "endurance"],
-    likes: 0, bookmarks: 0,
-  },
+  // ── MOVIES (movie-new-2 … movie-new-20) ───────────────────────────────────
+  // "Hope is a good thing…" (Shawshank) is kept as movie-10; the duplicate
+  // movie-new-1 entry (same slug, different attribution) was removed.
   {
     id: "movie-new-2",
     slug: "fight-club-things-you-own",
@@ -3151,7 +3140,7 @@ export const SEED_QUOTES: Quote[] = [
   },
   // ── Art ──────────────────────────────────────────────────────────────────────
   {
-    id: "art-1",
+    id: "s-frida-kahlo-feet",
     slug: "frida-kahlo-feet-why-do-i-need-them",
     text: "Feet, what do I need you for when I have wings to fly?",
     author: "Frida Kahlo",
