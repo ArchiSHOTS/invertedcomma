@@ -7,7 +7,6 @@ import {
   Bot, Globe, ShoppingCart, RefreshCw, FileSearch,
 } from "lucide-react";
 import { Quote, Comment } from "../types";
-import { getQuoteBySlug, getEnrichedQuotes } from "../data/quotes";
 import { useUser } from "../context/UserContext";
 import { useAnatomyIds } from "../hooks/useAnatomyIds";
 import SiteHeader from "../components/SiteHeader";
@@ -107,32 +106,41 @@ export default function QuotePage() {
   // ── Data loading ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!slug) return;
-    const local = getQuoteBySlug(slug);
-    if (local) {
-      setQuote(local);
-      setLocalLikes(local.likes);
-      document.title = `"${local.text.slice(0, 60)}…" — ${local.author} — Deep Dive with Inverted Comma`;
-      updateMeta("description", `${local.text} — ${local.author}`);
-      updateMeta("og:title", `"${local.text.slice(0, 80)}" — ${local.author} — Deep Dive with Inverted Comma`);
-      updateMeta("og:description", local.context || local.text);
-      updateMeta("og:url", window.location.href);
+    let cancelled = false;
+    // Always load from the DB-backed API (seed quotes were migrated into the DB),
+    // so admin edits are reflected here.
+    fetch(`/api/quotes/${slug}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        if (!d.quote) { navigate("/", { replace: true }); return; }
+        const q: Quote = d.quote;
+        setQuote(q);
+        setLocalLikes(q.likes ?? 0);
+        document.title = `"${q.text.slice(0, 60)}…" — ${q.author} — Deep Dive with Inverted Comma`;
+        updateMeta("description", `${q.text} — ${q.author}`);
+        updateMeta("og:title", `"${q.text.slice(0, 80)}" — ${q.author} — Deep Dive with Inverted Comma`);
+        updateMeta("og:description", q.context || q.text);
+        updateMeta("og:url", window.location.href);
 
-      const savedLocal: string[] = JSON.parse(localStorage.getItem("ic_saved_ids") || "[]");
-      setIsBookmarked(savedLocal.includes(local.id));
+        const savedLocal: string[] = JSON.parse(localStorage.getItem("ic_saved_ids") || "[]");
+        setIsBookmarked(savedLocal.includes(q.id));
 
-      const all = getEnrichedQuotes();
-      setRelatedQuotes(
-        all
-          .filter((q) => q.id !== local.id &&
-            (q.category === local.category || q.tags.some((t) => local.tags.includes(t))))
-          .slice(0, 4)
-      );
-    } else {
-      fetch(`/api/quotes/${slug}`)
-        .then((r) => r.json())
-        .then((d) => { if (d.quote) { setQuote(d.quote); setLocalLikes(d.quote.likes); } else navigate("/", { replace: true }); })
-        .catch(() => navigate("/", { replace: true }));
-    }
+        // Related quotes from the same category (DB-backed API).
+        if (q.category) {
+          fetch(`/api/quotes?category=${encodeURIComponent(q.category)}&limit=8`)
+            .then((r) => r.json())
+            .then((rd) => {
+              if (cancelled) return;
+              setRelatedQuotes(((rd.quotes || []) as Quote[])
+                .filter((x) => x.id !== q.id && x.slug !== q.slug)
+                .slice(0, 4));
+            })
+            .catch(() => {});
+        }
+      })
+      .catch(() => { if (!cancelled) navigate("/", { replace: true }); });
+    return () => { cancelled = true; };
   }, [slug]);
 
   // Open the tab referenced by the URL hash (e.g. ControlPage's /q/:slug#anatomy).

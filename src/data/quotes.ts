@@ -3728,8 +3728,17 @@ export const AVAILABLE_TAGS = Array.from(
   new Set(SEED_QUOTES.flatMap((q) => q.tags))
 ).sort();
 
-// Enrich quotes with additional cross-category tags and default sourceType
-export const getEnrichedQuotes = (): Quote[] => {
+// Seed quotes have been migrated into the runtime_quotes database table (see
+// tools/migrate-seeds-to-db.mjs) so the DB is the single source of truth — every
+// quote is now searchable/editable/deletable from the admin dashboard, and admin
+// edits are reflected on the live site. This returns [] so all seed-resolution
+// paths (server and client) fall through to the database. SEED_QUOTES is retained
+// only to derive AVAILABLE_TAGS / QUOTE_CATEGORIES above.
+export const getEnrichedQuotes = (): Quote[] => [];
+
+// The original tag-enrichment used at seed-migration time (kept for reference /
+// re-migration): adds cross-category tags + a default sourceType.
+export const enrichSeedQuotes = (): Quote[] => {
   return SEED_QUOTES.map((q) => {
     const extraTags: string[] = [];
     if (q.tags.includes("design")) extraTags.push("innovation", "creation");
