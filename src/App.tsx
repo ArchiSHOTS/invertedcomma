@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { BrowserRouter, Routes, Route, useSearchParams, useLocation, useNavigate } from "react-router-dom";
 import { Quote, CustomCollection } from "./types";
+import { fetchQuotesList, fetchTagsIndex } from "./hooks/useQuotesList";
 import { useBookmarks } from "./hooks/useBookmarks";
 import { useCollections } from "./hooks/useCollections";
 import { Search, X, Layers, LayoutGrid, BookOpen, RefreshCw, Library } from "lucide-react";
@@ -148,20 +149,29 @@ function HomePage() {
   const [isDiscussionOpen, setIsDiscussionOpen] = useState(false);
   const [shareCardQuote, setShareCardQuote] = useState<Quote | null>(null);
 
-  useEffect(() => { fetchData(); }, []);
-
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      const [qRes, tRes] = await Promise.all([fetch("/api/quotes"), fetch("/api/tags")]);
-      if (qRes.ok) setQuotes((await qRes.json()).quotes || []);
-      if (tRes.ok) setTags((await tRes.json()).tags || []);
+      const term = searchTerm.trim();
+      const tag = selectedTag || undefined;
+      const [qRes, tags] = await Promise.all([
+        fetchQuotesList({
+          limit: term || tag ? 200 : 100,
+          search: term || undefined,
+          tag,
+        }),
+        fetchTagsIndex(),
+      ]);
+      setQuotes(qRes.quotes || []);
+      setTags(tags);
     } catch (e) {
       console.error("Failed to load data:", e);
     } finally {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => { fetchData(); }, [searchTerm, selectedTag]);
 
   const handleOpenDiscussion = (quote: Quote) => {
     setDiscussionQuote(quote);

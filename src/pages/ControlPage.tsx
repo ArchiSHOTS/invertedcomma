@@ -246,8 +246,7 @@ function OverviewTab() {
   useEffect(() => {
     fetch("/api/admin/stats", { headers: authHeaders() })
       .then(r => r.json()).then(setStats).catch(console.error);
-    fetch("/api/quotes")
-      .then(r => r.json()).then(d => setQuotes(d.quotes || [])).catch(console.error);
+    fetch("/api/quotes?limit=200").then(r => r.json()).then(d => setQuotes(d.quotes || [])).catch(console.error);
   }, []);
 
   const categoryCounts = quotes.reduce((acc: Record<string, number>, q) => {
@@ -445,7 +444,7 @@ function AddQuoteForm({ onSaved, onCancel }: { onSaved: (q: any) => void; onCanc
   const sourceNameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetch("/api/quotes")
+    fetch("/api/quotes?limit=500")
       .then(r => r.json())
       .then(d => {
         const names = Array.from(new Set(
@@ -773,35 +772,51 @@ function QuotesTab() {
   // Social Content modal — the quote we're generating cards for
   const [socialQuote, setSocialQuote] = useState<Quote | null>(null);
 
+  const [adminTotal, setAdminTotal] = useState(0);
+  const [adminPage, setAdminPage] = useState(1);
+  const ADMIN_PAGE_SIZE = 50;
+
   const load = useCallback(() => {
     setLoading(true);
-    // Merge the public list (seed + published) with the admin list (ALL runtime
-    // quotes incl. pending/rejected) so the moderation queue is visible.
+    const params = new URLSearchParams({
+      page: String(adminPage),
+      limit: String(ADMIN_PAGE_SIZE),
+    });
+    if (statusFilter !== "all") params.set("status", statusFilter);
+    if (categoryFilter !== "all") params.set("category", categoryFilter);
+    if (search.trim()) params.set("search", search.trim());
+
     Promise.all([
-      fetch("/api/quotes").then(r => r.json()).catch(() => ({ quotes: [] })),
-      fetch("/api/admin/quotes", { headers: authHeaders() }).then(r => r.json()).catch(() => ({ quotes: [] })),
+      fetch(`/api/quotes?limit=200`).then(r => r.json()).catch(() => ({ quotes: [] })),
+      fetch(`/api/admin/quotes?${params}`, { headers: authHeaders() }).then(r => r.json()).catch(() => ({ quotes: [], total: 0 })),
     ]).then(([pub, adm]) => {
       const map = new Map<string, Quote>();
       (pub.quotes || []).forEach((q: Quote) => map.set(q.id, { ...q, status: (q.status || "published") as Quote["status"] }));
-      (adm.quotes || []).forEach((q: Quote) => map.set(q.id, q)); // admin row wins (true status)
+      (adm.quotes || []).forEach((q: Quote) => map.set(q.id, q));
       setQuotes([...map.values()]);
+      setAdminTotal(adm.total ?? (adm.quotes || []).length);
     }).finally(() => setLoading(false));
-  }, []);
+  }, [adminPage, statusFilter, categoryFilter, search]);
 
+  useEffect(() => { setAdminPage(1); }, [statusFilter, categoryFilter, search]);
   useEffect(() => { load(); }, [load]);
 
-  const displayed = quotes.filter(q => {
-    const matchStatus = statusFilter === "all" || (q.status || "published") === statusFilter;
-    const matchCategory = categoryFilter === "all" || q.category === categoryFilter;
-    const term = search.toLowerCase();
-    const matchSearch = !term ||
-      q.text.toLowerCase().includes(term) ||
-      q.author.toLowerCase().includes(term) ||
-      (q.source || "").toLowerCase().includes(term) ||
-      q.category.toLowerCase().includes(term);
-    return matchStatus && matchCategory && matchSearch;
-  });
-  const paged = usePaged([search, statusFilter, categoryFilter]);
+  const deletePendingWikiquote = async () => {
+    if (!confirm("Permanently delete ALL pending Wikiquote imports? This cannot be undone.")) return;
+    const res = await fetch("/api/admin/quotes/bulk/delete-pending-wikiquote", {
+      method: "POST", headers: authHeaders(),
+    });
+    if (res.ok) {
+      const d = await res.json();
+      alert(`Deleted ${d.deleted} pending Wikiquote quotes.`);
+      load();
+    } else {
+      alert("Delete failed.");
+    }
+  };
+
+  const displayed = quotes;
+  const paged = displayed;
 
 
   const pollImport = useCallback(() => {
@@ -846,7 +861,9 @@ function QuotesTab() {
   // exceed the 64kb JSON body limit (silent 413) and the write would never land.
   const bulkBody = (): string => {
     const allMatchingFilter =
-      selected.size === displayed.length && statusFilter !== "all" && !search.trim();
+      selected.size === displayed.length &&
+      displayed.length === adminTotal &&
+      statusFilter !== "all" && !search.trim();
     if (allMatchingFilter) {
       const filter: Record<string, string> = { status: statusFilter };
       if (categoryFilter !== "all") filter.category = categoryFilter;
@@ -1069,6 +1086,14 @@ function QuotesTab() {
           >
             {wqImport?.running ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
             Wikiquote
+          </button>
+          <button
+            onClick={deletePendingWikiquote}
+            className="flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-medium transition-all border border-red-200 text-red-600 hover:bg-red-50"
+            title="Delete all pending Wikiquote imports to reduce DB bloat"
+          >
+            <Trash2 className="w-3 h-3" />
+            Clear pending Wikiquote
           </button>
         </div>
       </div>
@@ -1385,11 +1410,11 @@ function QuotesTab() {
               <input type="checkbox" checked={selected.size > 0 && selected.size === displayed.length}
                 onChange={toggleSelectAll} className="w-4 h-4 cursor-pointer" />
               <span className="text-xs text-stone-500">
-                Select all <strong>{displayed.length.toLocaleString()}</strong> {statusFilter === "all" ? "quotes" : statusFilter}{categoryFilter !== "all" ? ` in ${categoryFilter}` : ""} matching this filter
+                Select all <strong>{adminTotal.toLocaleString()}</strong> {statusFilter === "all" ? "quotes" : statusFilter}{categoryFilter !== "all" ? ` in ${categoryFilter}` : ""} matching this filter
               </span>
             </label>
           )}
-          {displayed.slice(paged.from, paged.to).map(q =>
+          {displayed.map(q =>
             editingId === q.id ? (
               <div key={q.id} className="bg-stone-50 border border-stone-300 rounded-2xl p-4 space-y-3">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-stone-500">Editing quote</h3>
@@ -1468,7 +1493,7 @@ function QuotesTab() {
               </div>
             )
           )}
-          <Pagination page={paged.page} perPage={paged.perPage} total={displayed.length} onPage={paged.setPage} />
+          <Pagination page={adminPage} perPage={ADMIN_PAGE_SIZE} total={adminTotal} onPage={setAdminPage} />
         </div>
       )}
 
@@ -1595,7 +1620,7 @@ function SourcesTab() {
   const [activeType, setActiveType] = useState<string>("all");
 
   useEffect(() => {
-    fetch("/api/quotes").then(r => r.json()).then(d => setQuotes(d.quotes || []));
+    fetch("/api/quotes?limit=500").then(r => r.json()).then(d => setQuotes(d.quotes || []));
   }, []);
 
   const TYPES = [

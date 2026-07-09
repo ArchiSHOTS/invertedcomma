@@ -4,6 +4,11 @@
  */
 import pg from "pg";
 import dotenv from "dotenv";
+import {
+  recordRuntimeQuotesCacheHit,
+  recordRuntimeQuotesCacheMiss,
+  approxJsonBytes,
+} from "./egress-metrics.ts";
 dotenv.config();
 
 const { Pool } = pg;
@@ -104,6 +109,18 @@ export async function runMigrations() {
   )`);
   await pool.query(
     "CREATE INDEX IF NOT EXISTS comments_quote_id_idx ON comments(quote_id)"
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS runtime_quotes_status_idx ON runtime_quotes(status)"
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS runtime_quotes_slug_published_idx ON runtime_quotes(slug) WHERE status = 'published'"
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS runtime_quotes_author_published_idx ON runtime_quotes(author) WHERE status = 'published'"
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS runtime_quotes_tags_gin ON runtime_quotes USING GIN(tags)"
   );
   await pool.query(`CREATE TABLE IF NOT EXISTS subscribers (
     id               SERIAL PRIMARY KEY,
@@ -391,6 +408,10 @@ const RUNTIME_QUOTES_CACHE_TTL_MS = 3_600_000;
 
 function invalidateRuntimeQuotesCache() {
   runtimeQuotesCache = null;
+  import("./published-snapshot.ts").then((m) => {
+    m.invalidatePublishedSnapshot();
+    m.scheduleSnapshotRebuild();
+  }).catch((e) => console.error("[db] snapshot rebuild schedule failed:", e?.message));
 }
 
 // Columns needed for list/feed views. Deliberately EXCLUDES the large `enrichment`
@@ -401,15 +422,21 @@ const LIST_COLS =
   "id, slug, text, author, source, source_url, year, category, context, " +
   "tags, source_type, status, submitted_by, likes, bookmarks, created_at";
 
-// PUBLISHED quotes only — the public hot path. Cached (see TTL above).
+// PUBLISHED quotes only — legacy cache; public routes should use published-snapshot.ts.
 export async function getRuntimeQuotes() {
+  if (runtimeQuotesCache && runtimeQuotesCache.expiresAt >= Date.now()) {
+    recordRuntimeQuotesCacheHit();
+    return runtimeQuotesCache.rows;
+  }
   if (!runtimeQuotesCache || runtimeQuotesCache.expiresAt < Date.now()) {
     try {
       const { rows } = await pool.query(
         `SELECT ${LIST_COLS} FROM runtime_quotes WHERE status = 'published' ORDER BY created_at DESC`
       );
+      const mapped = rows.map((r: any) => ({ ...r, tags: r.tags ?? [] }));
+      recordRuntimeQuotesCacheMiss(mapped.length, approxJsonBytes(mapped));
       runtimeQuotesCache = {
-        rows: rows.map((r: any) => ({ ...r, tags: r.tags ?? [] })),
+        rows: mapped,
         expiresAt: Date.now() + RUNTIME_QUOTES_CACHE_TTL_MS,
       };
     } catch (e: any) {
@@ -433,6 +460,71 @@ export async function getAllRuntimeQuotes() {
     `SELECT ${LIST_COLS} FROM runtime_quotes ORDER BY created_at DESC`
   );
   return rows.map((r: any) => ({ ...r, tags: r.tags ?? [] }));
+}
+
+export interface AdminQuotesQuery {
+  status?: string;
+  sourceType?: string;
+  category?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+}
+
+/** Paginated admin moderation queue — avoids loading 50k+ rows at once. */
+export async function getAllRuntimeQuotesPaginated(opts: AdminQuotesQuery = {}) {
+  const page = Math.max(1, opts.page ?? 1);
+  const limit = Math.min(200, Math.max(1, opts.limit ?? 50));
+  const offset = (page - 1) * limit;
+  const where: string[] = [];
+  const params: any[] = [];
+  let i = 1;
+
+  if (opts.status && opts.status !== "all") {
+    where.push(`status = $${i++}`);
+    params.push(opts.status);
+  }
+  if (opts.sourceType) {
+    where.push(`source_type = $${i++}`);
+    params.push(opts.sourceType);
+  }
+  if (opts.category) {
+    where.push(`category = $${i++}`);
+    params.push(opts.category);
+  }
+  if (opts.search?.trim()) {
+    where.push(`(text ILIKE $${i} OR author ILIKE $${i} OR source ILIKE $${i})`);
+    params.push(`%${opts.search.trim()}%`);
+    i++;
+  }
+
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const countRes = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM runtime_quotes ${whereSql}`,
+    params
+  );
+  const total = countRes.rows[0]?.n ?? 0;
+  const { rows } = await pool.query(
+    `SELECT ${LIST_COLS} FROM runtime_quotes ${whereSql}
+     ORDER BY created_at DESC LIMIT $${i++} OFFSET $${i++}`,
+    [...params, limit, offset]
+  );
+  return {
+    quotes: rows.map((r: any) => ({ ...r, tags: r.tags ?? [] })),
+    total,
+    page,
+    limit,
+    totalPages: Math.max(1, Math.ceil(total / limit)),
+  };
+}
+
+/** Delete pending Wikiquote imports that were never published — cuts storage + admin load. */
+export async function deletePendingWikiquoteQuotes(): Promise<number> {
+  const { rowCount } = await pool.query(
+    "DELETE FROM runtime_quotes WHERE status = 'pending' AND source_type = 'wikiquote'"
+  );
+  invalidateRuntimeQuotesCache();
+  return rowCount ?? 0;
 }
 
 // Counts per status — for admin stats, so we never fetch full rows just to count.

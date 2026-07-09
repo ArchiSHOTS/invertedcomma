@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useQuotesList } from "../hooks/useQuotesList";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Tag } from "lucide-react";
 import SiteHeader from "../components/SiteHeader";
@@ -24,22 +25,18 @@ export default function TagPage() {
   const [discussionQuote, setDiscussionQuote] = useState<Quote | null>(null);
   const [isDiscussionOpen, setIsDiscussionOpen] = useState(false);
 
-  const [allQuotes, setAllQuotes] = useState<Quote[]>([]);
   const [page, setPage] = useState(1);
+  const { data, quotes: pagedQuotes } = useQuotesList({
+    tag,
+    page,
+    limit: PAGE_SIZE,
+    slim: false,
+  });
 
-  useEffect(() => {
-    fetch("/api/quotes")
-      .then(r => r.json())
-      .then(d => setAllQuotes(d.quotes || []))
-      .catch(console.error);
-  }, []);
-
-  // Reset to page 1 whenever the tag changes
   useEffect(() => { setPage(1); }, [tag]);
 
-  const taggedQuotes = allQuotes.filter(q => q.tags.includes(tag));
-  const totalPages = Math.max(1, Math.ceil(taggedQuotes.length / PAGE_SIZE));
-  const pagedQuotes = taggedQuotes.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const taggedQuotesTotal = data?.total ?? 0;
+  const totalPages = data?.totalPages ?? 1;
 
   const tagTitle = tag.charAt(0).toUpperCase() + tag.slice(1);
 
@@ -47,7 +44,7 @@ export default function TagPage() {
     <>
     <SEO
       title={`Explore #${tag} — browse, read and deep dive into quotes about ${tagTitle}`}
-      description={`${taggedQuotes.length} handpicked quotes tagged #${tag}. Read in context, discover counterpoints, and join the conversation on Inverted Comma.`}
+      description={`${taggedQuotesTotal} handpicked quotes tagged #${tag}. Read in context, discover counterpoints, and join the conversation on Inverted Comma.`}
       image={`https://www.invertedcomma.com/api/og/tag/${encodeURIComponent(tag)}`}
       path={`/tag/${tag}`}
     />
@@ -78,7 +75,7 @@ export default function TagPage() {
           </h1>
         </div>
 
-        {taggedQuotes.length === 0 ? (
+        {taggedQuotesTotal === 0 ? (
           <div className="text-center py-24 bg-white rounded-2xl border border-stone-200">
             <p className="font-serif italic text-stone-400 text-xl mb-2">No quotes yet for this tag.</p>
             <Link to="/" className="text-sm text-[#3D5A3E] hover:underline">Explore all quotes →</Link>

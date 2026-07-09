@@ -5,9 +5,10 @@ import {
   Feather, Hash, X, RefreshCw, ChevronLeft, ChevronRight, Sparkles, FileSearch,
 } from "lucide-react";
 import { Quote, SourceType } from "../types";
-import { useAnatomyIds } from "../hooks/useAnatomyIds";
+import { useQuotesList, fetchQuotesFacets } from "../hooks/useQuotesList";
 import SiteHeader from "../components/SiteHeader";
 import SiteFooter from "../components/SiteFooter";
+import { useAnatomyIds } from "../hooks/useAnatomyIds";
 
 // ── Source type metadata ────────────────────────────────────────────────────
 const SOURCE_TYPES: {
@@ -123,16 +124,18 @@ const PAGE_SIZE = 24;
 
 export default function ExplorePage() {
   const anatomyIds = useAnatomyIds();
-  const [quotes, setQuotes] = useState<Quote[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [activeSource, setActiveSource] = useState<SourceType | "all">("all");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [searchParams, setSearchParams] = useSearchParams();
+  const [facets, setFacets] = useState<{
+    sourceTypeCounts: Record<string, number>;
+    categoryCounts: Record<string, number>;
+    topTags: { name: string; count: number }[];
+    total: number;
+  } | null>(null);
 
-  // Search is driven entirely by the header search box (via the ?search= param) —
-  // the Explore page no longer renders its own search input.
   const searchTerm = searchParams.get("search") || "";
   const clearSearch = () => {
     const next = new URLSearchParams(searchParams);
@@ -141,53 +144,26 @@ export default function ExplorePage() {
   };
 
   useEffect(() => {
-    fetch("/api/quotes")
-      .then(r => r.json())
-      .then(d => setQuotes(d.quotes || []))
-      .catch(console.error)
-      .finally(() => setIsLoading(false));
+    fetchQuotesFacets().then(setFacets).catch(console.error);
   }, []);
 
-  // Derived counts
-  const sourceTypeCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    quotes.forEach(q => {
-      const t = q.sourceType ?? "book";
-      counts[t] = (counts[t] || 0) + 1;
-    });
-    return counts;
-  }, [quotes]);
+  useEffect(() => { setPage(1); }, [activeSource, activeCategory, activeTag, searchTerm]);
 
-  const categoryCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    quotes.forEach(q => { counts[q.category] = (counts[q.category] || 0) + 1; });
-    return counts;
-  }, [quotes]);
+  const { data, quotes, loading: isLoading } = useQuotesList({
+    page,
+    limit: PAGE_SIZE,
+    tag: activeTag || undefined,
+    category: activeCategory || undefined,
+    sourceType: activeSource !== "all" ? activeSource : undefined,
+    search: searchTerm.trim() || undefined,
+  });
 
-  const topTags = useMemo(() => {
-    const counts: Record<string, number> = {};
-    quotes.forEach(q => q.tags.forEach(t => { counts[t] = (counts[t] || 0) + 1; }));
-    return (Object.entries(counts) as [string, number][]).sort((a, b) => b[1] - a[1]).slice(0, 30);
-  }, [quotes]);
-
-  // Filtered quotes
-  const filtered = useMemo(() => {
-    return quotes.filter(q => {
-      if (activeSource !== "all" && (q.sourceType ?? "book") !== activeSource) return false;
-      if (activeCategory && q.category !== activeCategory) return false;
-      if (activeTag && !q.tags.includes(activeTag)) return false;
-      if (searchTerm.trim()) {
-        const term = searchTerm.toLowerCase();
-        return (
-          q.text.toLowerCase().includes(term) ||
-          q.author.toLowerCase().includes(term) ||
-          (q.source || "").toLowerCase().includes(term) ||
-          q.tags.some(t => t.toLowerCase().includes(term))
-        );
-      }
-      return true;
-    });
-  }, [quotes, activeSource, activeCategory, activeTag, searchTerm]);
+  const sourceTypeCounts = facets?.sourceTypeCounts ?? {};
+  const categoryCounts = facets?.categoryCounts ?? {};
+  const topTags = facets?.topTags ?? [];
+  const filtered = quotes;
+  const totalPages = data?.totalPages ?? 1;
+  const totalCount = data?.total ?? 0;
 
   const hasFilters = activeSource !== "all" || !!activeCategory || !!activeTag || !!searchTerm;
 
@@ -200,27 +176,18 @@ export default function ExplorePage() {
 
   const sortedCategories = (Object.entries(categoryCounts) as [string, number][]).sort((a, b) => b[1] - a[1]);
 
-  // ── Pagination ──
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
-  const paginated = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const paginated = filtered;
 
-  // Reset to the first page whenever the filters or search change
-  useEffect(() => {
-    setPage(1);
-  }, [activeSource, activeCategory, activeTag, searchTerm]);
-
-  // Scroll back to the top of the grid when paging
   const goToPage = (p: number) => {
     setPage(p);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  // Compact page-number list with ellipses (e.g. 1 … 4 5 [6] 7 8 … 20)
   const pageNumbers = useMemo(() => {
     const pages: (number | "…")[] = [];
     const push = (n: number | "…") => pages.push(n);
-    const span = 1; // pages on each side of the current page
+    const span = 1;
     for (let p = 1; p <= totalPages; p++) {
       if (p === 1 || p === totalPages || (p >= currentPage - span && p <= currentPage + span)) {
         push(p);
@@ -247,7 +214,7 @@ export default function ExplorePage() {
         {/* ── Source type tabs ── */}
         <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-2 mb-8">
           {SOURCE_TYPES.map(({ key, label, Icon, color }) => {
-            const count = key === "all" ? quotes.length : (sourceTypeCounts[key] || 0);
+            const count = key === "all" ? (facets?.total ?? totalCount) : (sourceTypeCounts[key] || 0);
             if (key !== "all" && count === 0) return null;
             const active = activeSource === key;
             return (
@@ -333,17 +300,17 @@ export default function ExplorePage() {
             <div>
               <h3 className="text-[10px] font-bold uppercase tracking-widest text-stone-400 mb-2 px-1">Popular Tags</h3>
               <div className="flex flex-wrap gap-1">
-                {topTags.map(([tag]) => (
+                {topTags.map((t) => (
                   <button
-                    key={tag}
-                    onClick={() => setActiveTag(activeTag === tag ? null : tag)}
+                    key={t.name}
+                    onClick={() => setActiveTag(activeTag === t.name ? null : t.name)}
                     className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-full border transition-all ${
-                      activeTag === tag
+                      activeTag === t.name
                         ? "bg-[#3D5A3E] text-white border-[#3D5A3E]"
                         : "bg-white text-stone-500 border-stone-200 hover:border-stone-400"
                     }`}
                   >
-                    #{tag}
+                    #{t.name}
                   </button>
                 ))}
               </div>
@@ -357,7 +324,7 @@ export default function ExplorePage() {
                 <RefreshCw className="w-5 h-5 text-[#3D5A3E] animate-spin" />
                 <span className="text-xs font-mono text-stone-400 uppercase tracking-wider">Loading quotes…</span>
               </div>
-            ) : filtered.length === 0 ? (
+            ) : paginated.length === 0 ? (
               <div className="text-center py-20 bg-white rounded-2xl border border-stone-200">
                 <p className="text-stone-400 font-serif italic text-lg">No quotes found.</p>
                 <p className="text-stone-400 text-sm mt-1">Try adjusting your filters.</p>
@@ -422,17 +389,17 @@ export default function ExplorePage() {
         <div className="md:hidden mt-6">
           <p className="text-[10px] font-bold uppercase tracking-widest text-stone-400 mb-2">Filter by tag</p>
           <div className="flex overflow-x-auto gap-2 pb-2 scrollbar-none -mx-5 px-5">
-            {topTags.slice(0, 20).map(([tag]) => (
+            {topTags.slice(0, 20).map((t) => (
               <button
-                key={tag}
-                onClick={() => setActiveTag(activeTag === tag ? null : tag)}
+                key={t.name}
+                onClick={() => setActiveTag(activeTag === t.name ? null : t.name)}
                 className={`flex-shrink-0 text-[10px] font-medium px-3 py-1.5 rounded-full border transition-all ${
-                  activeTag === tag
+                  activeTag === t.name
                     ? "bg-[#3D5A3E] text-white border-[#3D5A3E]"
                     : "bg-white text-stone-500 border-stone-200"
                 }`}
               >
-                #{tag}
+                #{t.name}
               </button>
             ))}
           </div>
