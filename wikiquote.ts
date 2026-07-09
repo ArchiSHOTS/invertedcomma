@@ -200,6 +200,18 @@ function clean(s: string): string {
   return t;
 }
 
+// Wikiquote often lists "quotes about other people" inline under an author's main
+// Quotes section, e.g. "About Le Corbusier: Well, now that he's finished one
+// building, he'll go write four books about it." The "About X:" / "On his ...:"
+// label isn't part of the quote — split it out so it can seed `context` instead.
+const ATTRIBUTION_PREFIX_RE = /^(About\s+.{2,60}|On\s+(?:his|her|their|its|[A-Z]\w*'s)\s+.{0,50}):\s+/;
+
+function splitAttributionPrefix(t: string): { text: string; prefix: string } {
+  const m = t.match(ATTRIBUTION_PREFIX_RE);
+  if (!m) return { text: t, prefix: "" };
+  return { text: t.slice(m[0].length).trim(), prefix: m[1].trim() };
+}
+
 const NON_EN_WORDS = new Set((
   "le les un une des qui que dans pour avec pas cette est sont toujours quand " +
   "rien tout mais comme sans faut leur vous nous aussi plus " +
@@ -316,7 +328,8 @@ export async function importWikiquote(opts: ImportOptions = {}): Promise<number>
         let kept = 0;
         for (const item of raw) {
           if (kept >= maxPerAuthor || total >= targetCount) break;
-          const text = clean(item.raw);
+          const cleaned = clean(item.raw);
+          const { text, prefix } = splitAttributionPrefix(cleaned);
           if (!isGoodQuote(text)) continue;
           const key = norm(text);
           if (seen.has(key)) continue;
@@ -330,7 +343,7 @@ export async function importWikiquote(opts: ImportOptions = {}): Promise<number>
               text, author: page,
               source: src.slice(0, 160), sourceUrl,
               year: ym ? Number(ym[1]) : null,
-              category, context: "", tags: [],
+              category, context: prefix ? `${prefix}.` : "", tags: [],
               sourceType: "wikiquote", status: "pending", submittedBy: null,
             });
           }
