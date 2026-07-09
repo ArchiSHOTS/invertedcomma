@@ -178,6 +178,7 @@ app.use("/api/quotes/:id/insights",  aiLimiter);
 app.use("/api/discussions/:id/ai-counterpoint", aiLimiter);
 app.use("/api/admin/extract-youtube", aiLimiter);
 app.use("/api/admin/extract-text",    aiLimiter);
+app.use("/api/admin/attribute-quote", aiLimiter);
 
 // ── Body size limit ───────────────────────────────────────────────────────────
 app.use(express.json({ limit: "512kb" }));
@@ -1837,6 +1838,52 @@ Extract 3-15 quotes. Return ONLY the JSON array.`;
   } catch (error: any) {
     console.error("Text extraction error:", error);
     res.status(500).json({ error: "Extraction failed: " + error.message });
+  }
+});
+
+// AI auto-fill: given just the quote text, infer author + metadata for the admin
+// Add-quote form. Fills-then-review — the admin confirms before saving. The model
+// is told never to invent a source/year (returns null/low-confidence instead).
+app.post("/api/admin/attribute-quote", adminMiddleware, async (req, res) => {
+  const { text, categories, sourceTypes } = req.body || {};
+  if (!text || typeof text !== "string" || text.trim().length < 3) {
+    return res.status(400).json({ error: "Provide the quote text first." });
+  }
+  if (!aiReady()) {
+    return res.status(503).json({ error: "AI is not configured. Set a provider + API key in the dashboard AI tab." });
+  }
+
+  const cats = Array.isArray(categories) && categories.length ? categories.filter((c: any) => typeof c === "string") : [];
+  const types = Array.isArray(sourceTypes) && sourceTypes.length
+    ? sourceTypes.filter((t: any) => typeof t === "string")
+    : ["book", "movie", "speech", "essay", "poetry", "article", "interview", "song", "other"];
+
+  const prompt = `You are a quote attribution expert. Identify the metadata for this quote.
+
+Quote: "${text.trim().slice(0, 1000)}"
+
+Return ONLY a JSON object with exactly these keys:
+{
+  "author": "best-known name of who said or wrote it; empty string if genuinely unknown",
+  "year": <integer year it was first said or published (negative for BCE), or null if unsure>,
+  "category": ${cats.length ? `"pick exactly one of: ${cats.join(" | ")}"` : `"a short topical category"`},
+  "sourceType": "one of: ${types.join(", ")}",
+  "sourceName": "the work it's from (book, film, speech, essay, or interview title), or empty string",
+  "context": "1-2 sentences: who said it, when/where, and why it matters",
+  "tags": ["3 to 5 lowercase single-word topical tags"],
+  "confidence": { "author": "high|medium|low", "year": "high|medium|low", "source": "high|medium|low" }
+}
+
+Be accurate. NEVER invent a source or a year — use null / empty string and "low" confidence when you are not sure.`;
+
+  try {
+    const response = await generateWithFallback(prompt, { temperature: 0.2, responseMimeType: "application/json" });
+    const attribution = extractJsonObject(response.text || "{}");
+    res.json({ ok: true, attribution });
+  } catch (err: any) {
+    const { status, message } = aiError(err);
+    console.error("[attribute-quote] error:", err?.message);
+    res.status(status).json({ error: message });
   }
 });
 
