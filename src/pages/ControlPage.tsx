@@ -773,6 +773,7 @@ function QuotesTab() {
   const [socialQuote, setSocialQuote] = useState<Quote | null>(null);
 
   const [adminTotal, setAdminTotal] = useState(0);
+  const [pendingTotal, setPendingTotal] = useState(0);
   const [adminPage, setAdminPage] = useState(1);
   const ADMIN_PAGE_SIZE = 50;
 
@@ -786,15 +787,21 @@ function QuotesTab() {
     if (categoryFilter !== "all") params.set("category", categoryFilter);
     if (search.trim()) params.set("search", search.trim());
 
+    // Header pending count (matches the current search/category), independent of
+    // the status tab — a cheap COUNT + 1 row.
+    const pendingParams = new URLSearchParams({ status: "pending", limit: "1" });
+    if (categoryFilter !== "all") pendingParams.set("category", categoryFilter);
+    if (search.trim()) pendingParams.set("search", search.trim());
+
     Promise.all([
-      fetch(`/api/quotes?limit=200`).then(r => r.json()).catch(() => ({ quotes: [] })),
       fetch(`/api/admin/quotes?${params}`, { headers: authHeaders() }).then(r => r.json()).catch(() => ({ quotes: [], total: 0 })),
-    ]).then(([pub, adm]) => {
-      const map = new Map<string, Quote>();
-      (pub.quotes || []).forEach((q: Quote) => map.set(q.id, { ...q, status: (q.status || "published") as Quote["status"] }));
-      (adm.quotes || []).forEach((q: Quote) => map.set(q.id, q));
-      setQuotes([...map.values()]);
+      fetch(`/api/admin/quotes?${pendingParams}`, { headers: authHeaders() }).then(r => r.json()).catch(() => ({ total: 0 })),
+    ]).then(([adm, pend]) => {
+      // Show ONLY the filtered admin results — merging the public feed here made
+      // the list ignore the search/status filters and mis-count the total.
+      setQuotes(adm.quotes || []);
       setAdminTotal(adm.total ?? (adm.quotes || []).length);
+      setPendingTotal(pend.total ?? 0);
     }).finally(() => setLoading(false));
   }, [adminPage, statusFilter, categoryFilter, search]);
 
@@ -1064,7 +1071,7 @@ function QuotesTab() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-stone-900">Quotes</h2>
-          <p className="text-xs text-stone-500 mt-0.5">{quotes.length} total · {quotes.filter(q => q.status === "pending").length} pending</p>
+          <p className="text-xs text-stone-500 mt-0.5">{adminTotal.toLocaleString()} {statusFilter === "all" ? "total" : statusFilter} · {pendingTotal.toLocaleString()} pending</p>
         </div>
         <div className="flex flex-wrap gap-2">
           {(["manual", "youtube", "paste"] as const).map(mode => (
